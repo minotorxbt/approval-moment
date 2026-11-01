@@ -56,7 +56,7 @@ page text are processed in a TEE-backed environment rather than by a general-pur
 | Part | State |
 | --- | --- |
 | Rules engine, API, UI, receipt, delivery stepper | Working, covered by tests |
-| NEAR AI Cloud verifier | Implemented against the documented OpenAI-compatible API and unit-tested with a mocked response. **Not yet exercised against the live service.** If the call fails the app falls back to rules only and says so in the UI. |
+| NEAR AI Cloud verifier | Implemented against the documented OpenAI-compatible API and unit-tested with a mocked response. Run by hand against the live service on 1 Nov 2026 (model `zai-org/GLM-5.1-FP8`): all three demo scenarios returned sensible reasons. If the call fails the app falls back to rules only and says so in the UI. |
 | TEE attestation shown to the user | **Not implemented.** The UI says so. |
 | NEAR Intents payment / on-chain escrow | **Not implemented.** Payment, escrow, shipping and dispute pool are simulated in the page. |
 | Shops, carriers, real money | None. All scenarios are fixed demo data in `scenarios.js`. |
