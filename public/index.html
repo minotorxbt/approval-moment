@@ -78,6 +78,7 @@ details summary{cursor:pointer;color:var(--mute);font-size:14px}
 <main>
 <h1>Approval Moment</h1>
 <p class="sub">An agent keeps track of your yearly payments and buys things for you. Before any money moves, a separate verifier compares the agent's plan with your rule.</p>
+<div class="note demo" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><span><a href="/suite">Attack suite: see how the verifier scores against all demo attacks</a></span></div>
 <div class="note demo">Demo data: insurers, schools, shops, inspection centers, offers and payments are simulated. No real money moves.</div>
 <div class="layout">
 <div class="col">
@@ -155,6 +156,7 @@ const p=it.proposals[pi],S=sess[sel]||(sess[sel]={receipt:"",order:null,rc:null,
 const due=it.oneOff?null:list.find(x=>x.id===sel).due;
 $("work").innerHTML='<h2>'+esc(it.title)+(due?' · due '+esc(due):'')+'</h2>'+
 '<h2>1. What the agent comes back with</h2><div class="tabs" id="tabs">'+it.proposals.map((x,i)=>'<button aria-pressed="'+(i===pi)+'" data-i="'+i+'">'+esc(x.label)+'</button>').join("")+'</div>'+
+'<div class="ia" style="margin-top:10px"><button class="go" id="ag">Let the agent choose</button><span class="m" style="color:var(--mute);font-size:14px">The agent reads all offers and picks one. The verifier then checks that choice.</span></div>'+(S.agent&&S.agent.pi===pi?'<div class="note" style="background:var(--okbg)"><b>Agent ('+esc(S.agent.mode==="live"?"NEAR AI Cloud":S.agent.mode==="demo"?"simulated agent, no key":"fallback")+'):</b> '+esc(S.agent.why)+'</div>':'')+
 '<h2>2. Your rule and the agent</h2><div class="card"><div class="b me">'+esc(it.instruction)+'</div><div class="b ai">'+esc(it.agentSays)+'</div></div>'+
 '<h2>3. Payment plan prepared by the agent</h2><div class="card">'+rows([["Item",p.plan.item],["Price",money(p.plan.price)],["Pay to",p.plan.to]].concat(Object.entries(p.plan.attrs||{}).map(e=>[e[0][0].toUpperCase()+e[0].slice(1),e[1]])).concat(p.plan.slot?[["Appointment",p.plan.slot]]:[]))+'</div>'+
 '<h2>4. Page the agent read</h2><div class="card"><div class="pg"><b>'+esc(p.plan.item)+'</b><div>'+esc(p.page.visible)+'</div><div class="m">Payee: '+esc(p.plan.seller)+'</div>'+(p.page.hidden?'<div class="hid"><b>Text invisible to the eye (the agent read it):</b><br>'+esc(p.page.hidden)+'</div>':'')+'</div></div>'+
@@ -276,6 +278,17 @@ function stage(a){
 const S=sess[sel],o=S&&S.pi===pi?S.order:null;if(!o||a!=="expire")return;
 fetch("/api/orders/"+o.id+"/expire",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}).then(r=>r.json()).then(d=>{if(d.error)say(d.error,"warn")}).catch(()=>say("Could not reach the server.","warn"))}
 
+async function askAgent(btn){
+const id=sel;btn.disabled=true;btn.textContent="The agent is reading the offers…";
+try{const r=await fetch("/api/agent",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({item:id})});
+const d=await r.json();if(!r.ok)throw new Error(d.error||"HTTP "+r.status);
+const it=item(id),i=it.proposals.findIndex(x=>x.id===d.offerId);if(i<0)throw new Error("unknown offer");
+if(sel!==id)return;
+pi=i;(sess[id]||(sess[id]={receipt:"",order:null,rc:null,ev:[],seen:0})).agent={pi:i,why:d.why,mode:d.mode};
+renderWork();
+say("The agent chose “"+it.proposals[i].label+"”: "+d.why,d.mode==="fallback"?"warn":"");
+}catch(e){btn.disabled=false;btn.textContent="Let the agent choose";say("The agent could not answer ("+e.message+").","warn")}}
+
 /* A provider (or the timeout) changed an order: fetch it and explain what is new. */
 async function refreshOrder(id){
 const key=Object.keys(sess).find(k=>sess[k].order&&sess[k].order.id===id);if(!key)return;
@@ -295,6 +308,7 @@ try{const es=new EventSource("/api/stream");es.addEventListener("order",m=>{try{
 
 $("work").addEventListener("click",e=>{const b=e.target.closest("button");if(!b||b.dataset.ev)return;
 if(b.dataset.i!==undefined){pi=+b.dataset.i;renderWork();return}
+if(b.id==="ag"){askAgent(b);return}
 if(b.id==="ok")approve();else if(b.id==="no")reject();else if(b.dataset.a)stage(b.dataset.a)});
 $("list").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;const id=b.closest(".item").dataset.id;
 if(b.dataset.a==="open")openItem(id);

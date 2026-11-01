@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Attack suite – Approval Moment</title>
+<style>
+:root{--bg:#f6f5f1;--card:#fff;--ink:#1c1b19;--mute:#6b6962;--line:#e3e0d8;--ok:#1f7a4d;--warn:#a86a00;--bad:#b3261e;--warnbg:#fff3dc;--acc:#2f4bd6}
+@media (prefers-color-scheme:dark){:root{--bg:#151513;--card:#201f1c;--ink:#f1efe9;--mute:#a09d94;--line:#34322d;--ok:#5fd08f;--warn:#f0b04a;--bad:#ff8a80;--warnbg:#33290f;--acc:#8ea2ff}}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:900px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:24px;margin:8px 0 4px}p.sub{color:var(--mute);margin:0 0 14px}
+.note{background:var(--warnbg);border-radius:10px;padding:10px 12px;font-size:14px;margin:10px 0}
+.bar{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
+button{font:inherit;padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+button.go{background:var(--acc);border-color:var(--acc);color:#fff}button:disabled{opacity:.5}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:12px 0}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}.tile b{font-size:26px;display:block}.tile span{color:var(--mute);font-size:14px}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:14px}
+th,td{padding:8px 10px;border-top:1px solid var(--line);text-align:left}th{color:var(--mute);font-weight:600;border-top:0}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.v{font-weight:700}
+.wrap{overflow-x:auto}a{color:var(--acc)}
+</style>
+</head>
+<body>
+<main>
+<h1>Attack suite</h1>
+<p class="sub">Runs every demo proposal (honest, sloppy and malicious) through the verifier and compares the result with the answer a correct verifier should give. <a href="/">Back to the app</a></p>
+<div class="note">This is a regression check, not an independent benchmark: the fixed rules were written with these cases in view. A hidden-text rule that catches a new attack is a good sign, but the real test is attacks nobody has thought of yet. The AI run adds NEAR AI Cloud as a second opinion that can only make a verdict stricter.</div>
+<div class="bar"><button class="go" id="r1">Run fixed rules (instant)</button><button id="r2">Run with NEAR AI (slow, needs a key)</button></div>
+<div id="out"></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const V=v=>v?'<span class="v '+esc(v)+'">'+esc(v)+'</span>':'<span class="m">–</span>';
+async function run(ai){
+$("r1").disabled=$("r2").disabled=true;$("out").innerHTML='<p class="sub">Running'+(ai?' (each proposal is checked by the model, this can take a minute)':'')+'…</p>';
+try{const r=await fetch("/api/suite",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ai})});
+if(!r.ok)throw new Error("HTTP "+r.status);const d=await r.json(),s=d.summary;
+const t=(n,l)=>'<div class="tile"><b>'+esc(n)+'</b><span>'+esc(l)+'</span></div>';
+$("out").innerHTML='<div class="tiles">'+t(s.attacksBlocked+" / "+s.attacks,"attacks blocked")+t(s.honestPassed+" / "+s.honest,"honest payments passed")+t(s.warningsFlagged+" / "+s.warnings,"sloppy cases flagged")+t(s.falseBlocks,"honest cases wrongly stricter")+t(s.missed,"cases judged too loosely")+(s.mode==="live"?t(s.aiStricterThanRules,"cases where the AI made it stricter"):"")+'</div>'+
+'<p class="sub">Mode: '+esc(s.mode)+'</p><div class="wrap"><table><tr><th>Case</th><th>Should be</th><th>Fixed rules</th><th>NEAR AI</th><th>Final</th><th></th></tr>'+
+d.results.map(x=>'<tr><td>'+esc(x.item)+' / '+esc(x.label)+'</td><td>'+V(x.truth)+'</td><td>'+V(x.rules)+'</td><td>'+V(x.ai)+'</td><td>'+V(x.final)+'</td><td class="'+(x.match?"ok":"bad")+'">'+(x.match?"✓":"✗")+'</td></tr>').join("")+'</table></div>'}
+catch(e){$("out").innerHTML='<div class="note">Could not run the suite ('+esc(e.message)+').</div>'}
+$("r1").disabled=$("r2").disabled=false}
+$("r1").onclick=()=>run(false);$("r2").onclick=()=>run(true);run(false);
+</script>
+</body>
+</html>

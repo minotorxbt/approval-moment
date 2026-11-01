@@ -5,6 +5,7 @@ import path from "node:path";
 import { ITEMS, ITEM_ORDER } from "./scenarios.js";
 import { verify, fetchAttestation } from "./verifier.js";
 import { check } from "./rules.js";
+import { chooseOffer } from "./agent.js";
 import { createOrder, providerAction, expireOrder, userView, providerView } from "./orders.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -65,7 +66,44 @@ function stateFor(now) {
   };
 }
 
-export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, now = () => new Date() } = {}) {
+const LEVEL = { ok: 0, warn: 1, bad: 2 };
+export async function runSuite({ ai, verifyImpl }) {
+  const cases = ITEM_ORDER.flatMap((id) => ITEMS[id].proposals.map((p) => ({ item: ITEMS[id], p })));
+  const results = new Array(cases.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < cases.length) {
+      const i = next++;
+      const { item, p } = cases[i];
+      const input = { ins: item.rule, plan: p.plan, page: p.page };
+      const rules = check(input.ins, input.plan, input.page).verdict;
+      let final = rules, aiVerdict = null, mode = "rules";
+      if (ai) {
+        const v = await verifyImpl(input);
+        mode = v.mode; final = v.verdict; aiVerdict = v.ai ? v.ai.verdict : null;
+      }
+      results[i] = { item: item.id, proposal: p.id, label: p.label, truth: p.truth, rules, ai: aiVerdict, final, mode, match: final === p.truth };
+    }
+  };
+  await Promise.all(Array.from({ length: ai ? 4 : 1 }, worker));
+  const attacks = results.filter((r) => r.truth === "bad");
+  const sum = {
+    total: results.length,
+    attacks: attacks.length,
+    attacksBlocked: attacks.filter((r) => r.final === "bad").length,
+    honestPassed: results.filter((r) => r.truth === "ok" && r.final === "ok").length,
+    honest: results.filter((r) => r.truth === "ok").length,
+    warnings: results.filter((r) => r.truth === "warn").length,
+    warningsFlagged: results.filter((r) => r.truth === "warn" && r.final === "warn").length,
+    falseBlocks: results.filter((r) => LEVEL[r.final] > LEVEL[r.truth]).length,
+    missed: results.filter((r) => LEVEL[r.final] < LEVEL[r.truth]).length,
+    aiStricterThanRules: results.filter((r) => LEVEL[r.final] > LEVEL[r.rules]).length,
+    mode: results.some((r) => r.mode === "live") ? "live" : "rules only",
+  };
+  return { summary: sum, results };
+}
+
+export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, agentImpl = chooseOffer, now = () => new Date() } = {}) {
   const orders = new Map();
   const watchers = new Set();
   const announce = (id) => { for (const w of watchers) w.write(`event: order\ndata: ${JSON.stringify({ id })}\n\n`); };
@@ -80,6 +118,7 @@ export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, 
       const post = req.method === "POST";
 
       if (get && (p === "/" || p === "/index.html")) return send(res, 200, await readFile(path.join(here, "public", "index.html"), "utf8"), "text/html; charset=utf-8");
+      if (get && p === "/suite") return send(res, 200, await readFile(path.join(here, "public", "suite.html"), "utf8"), "text/html; charset=utf-8");
       if (get && p === "/provider") return send(res, 200, await readFile(path.join(here, "public", "provider.html"), "utf8"), "text/html; charset=utf-8");
       if (get && p === "/api/status") return send(res, 200, { mode: process.env.NEAR_AI_API_KEY ? "live" : "demo" });
       if (get && p === "/api/state") return send(res, 200, stateFor(now()));
@@ -100,6 +139,24 @@ export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, 
         const proposal = item && typeof body.proposal === "string" ? item.proposals.find((x) => x.id === body.proposal) : null;
         if (!item || !proposal) return send(res, 400, { error: "unknown item or proposal" });
         return send(res, 200, await verifyImpl({ ins: item.rule, plan: proposal.plan, page: proposal.page }));
+      }
+
+      if (post && p === "/api/agent") {
+        const body = await jsonBody(req, res);
+        if (!body) return;
+        const item = typeof body.item === "string" && Object.hasOwn(ITEMS, body.item) ? ITEMS[body.item] : null;
+        if (!item) return send(res, 400, { error: "unknown item" });
+        const offers = item.proposals.map(({ id, label, plan, page }) => ({ id, label, plan, page }));
+        const out = await agentImpl({ instruction: item.instruction, offers });
+        const ok = offers.some((o) => o.id === out.offerId);
+        return send(res, 200, ok ? out : { mode: "fallback", offerId: offers[0].id, why: "Invalid agent answer, first offer used." });
+      }
+
+      // Runs every demo proposal through the checks and compares with the answer a correct verifier should give.
+      if (post && p === "/api/suite") {
+        const body = await jsonBody(req, res);
+        if (!body) return;
+        return send(res, 200, await runSuite({ ai: body.ai === true, verifyImpl }));
       }
 
       // The user approved a plan: create the order the provider will see. The fixed rules are run again here,

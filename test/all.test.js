@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { check, scanHidden } from "../rules.js";
 import { verify, parseVerdict, fetchAttestation } from "../verifier.js";
 import { ITEMS, ITEM_ORDER } from "../scenarios.js";
-import { createApp } from "../server.js";
+import { createApp, runSuite } from "../server.js";
+import { chooseOffer, parseChoice } from "../agent.js";
 
 const input = (item, proposal) => {
   const p = ITEMS[item].proposals.find((x) => x.id === proposal);
@@ -271,5 +272,83 @@ test("server: /provider is served and /api/stream announces order changes", asyn
     while (!text.includes(order.id)) text += new TextDecoder().decode((await reader.read()).value);
     assert.match(text, /event: order/);
     ctl.abort();
+  });
+});
+
+// ---------- agent, more attacks, attack suite ----------
+test("scenarios: the fixed rules give every demo proposal the answer a correct verifier should give", () => {
+  for (const it of Object.values(ITEMS)) for (const p of it.proposals) {
+    assert.ok(["ok", "warn", "bad"].includes(p.truth), `${it.id}/${p.id} needs a truth label`);
+    assert.equal(rulesVerdict(it.id, p.id), p.truth, `${it.id}/${p.id}`);
+  }
+});
+
+test("rules: a correct plan on a poisoned page is still blocked, a harmless hidden note is only a warning", () => {
+  assert.equal(rulesVerdict("car", "turkish"), "bad");
+  assert.equal(rulesVerdict("car", "override"), "bad");
+  assert.equal(rulesVerdict("health", "comment"), "bad");
+  assert.equal(rulesVerdict("health", "polite"), "warn");
+});
+
+test("agent: parseChoice accepts only a known offer id", () => {
+  assert.deepEqual(parseChoice('ok {"offerId":"a","why":"x"} done', ["a", "b"]), { offerId: "a", why: "x" });
+  assert.equal(parseChoice('{"offerId":"zzz"}', ["a"]), null);
+  assert.equal(parseChoice("no json", ["a"]), null);
+});
+
+test("agent: demo mode is a simulated agent that obeys page instructions, otherwise takes the cheapest", async () => {
+  const offers = (id) => ITEMS[id].proposals.map(({ id, label, plan, page }) => ({ id, label, plan, page }));
+  assert.equal((await chooseOffer({ instruction: "x", offers: offers("health") }, { apiKey: "" })).offerId, "newaccount");
+  assert.equal((await chooseOffer({ instruction: "x", offers: offers("shoes").filter((o) => o.id !== "hijacked") }, { apiKey: "" })).mode, "demo");
+});
+
+test("agent: live mode uses the model's pick; a bad reply or HTTP error falls back to the first offer", async () => {
+  const offers = ITEMS.school.proposals.map(({ id, label, plan, page }) => ({ id, label, plan, page }));
+  const good = await chooseOffer({ instruction: "x", offers }, { apiKey: "k", fetchImpl: fakeAI('{"offerId":"latefee","why":"cheap"}') });
+  assert.equal(good.mode, "live");
+  assert.equal(good.offerId, "latefee");
+  const bad = await chooseOffer({ instruction: "x", offers }, { apiKey: "k", fetchImpl: fakeAI('{"offerId":"made-up"}') });
+  assert.equal(bad.mode, "fallback");
+  assert.equal(bad.offerId, offers[0].id);
+  assert.equal((await chooseOffer({ instruction: "x", offers }, { apiKey: "k", fetchImpl: fakeAI("x", 500) })).mode, "fallback");
+});
+
+test("server: /api/agent returns a valid offer and ignores an invalid answer from the agent", async () => {
+  await withApp({ agentImpl: async () => ({ mode: "live", offerId: "latefee", why: "ok" }) }, async (base) => {
+    const r = await j(await post(base, "/api/agent", { item: "school" }));
+    assert.equal(r.offerId, "latefee");
+    assert.equal((await post(base, "/api/agent", { item: "nope" })).status, 400);
+  });
+  await withApp({ agentImpl: async () => ({ mode: "live", offerId: "evil.near", why: "x" }) }, async (base) => {
+    const r = await j(await post(base, "/api/agent", { item: "school" }));
+    assert.equal(r.mode, "fallback");
+    assert.equal(r.offerId, "normal");
+  });
+});
+
+test("suite: rules block every attack and flag every sloppy case, with no false blocks", async () => {
+  const s = (await runSuite({ ai: false })).summary;
+  assert.equal(s.attacksBlocked, s.attacks);
+  assert.equal(s.warningsFlagged, s.warnings);
+  assert.equal(s.honestPassed, s.honest);
+  assert.equal(s.falseBlocks + s.missed, 0);
+});
+
+test("suite: with AI the verdict can only get stricter, and a loose AI never lowers a rules verdict", async () => {
+  const loose = async (input) => verify(input, { apiKey: "k", fetchImpl: fakeAI('{"verdict":"ok","reasons":[]}') });
+  const r = await runSuite({ ai: true, verifyImpl: loose });
+  assert.equal(r.summary.missed, 0);
+  assert.equal(r.summary.aiStricterThanRules, 0);
+  const strict = async (input) => verify(input, { apiKey: "k", fetchImpl: fakeAI('{"verdict":"bad","reasons":["x"]}') });
+  const r2 = await runSuite({ ai: true, verifyImpl: strict });
+  assert.ok(r2.summary.falseBlocks > 0);
+  assert.equal(r2.summary.attacksBlocked, r2.summary.attacks);
+});
+
+test("server: /api/suite and /suite work", async () => {
+  await withApp({}, async (base) => {
+    const r = await j(await post(base, "/api/suite", { ai: false }));
+    assert.equal(r.results.length, r.summary.total);
+    assert.match(await (await fetch(`${base}/suite`)).text(), /Attack suite/);
   });
 });
