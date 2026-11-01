@@ -82,6 +82,9 @@ details summary{cursor:pointer;color:var(--mute);font-size:14px}
 <div class="note demo">Demo data: insurers, schools, shops, inspection centers, offers and payments are simulated. No real money moves.</div>
 <div class="layout">
 <div class="col">
+<h2>Your agent's wallet key (NEAR)</h2>
+<div class="card" id="nearbox"><div class="im" style="margin:0 0 8px">A safe agent holds a function-call key, not a full-access key. Enter a NEAR account to list its keys, or add the agent's <b>public</b> key (starts with ed25519:) to check just that one. The data is read from NEAR. Nothing is signed and no secret is needed. Never paste a seed phrase or a private key here.</div>
+<div class="ia"><select id="nnet"><option value="testnet">testnet</option><option value="mainnet">mainnet</option></select><input id="nacc" placeholder="account, e.g. alice.testnet" size="22" autocomplete="off"><input id="nkey" placeholder="ed25519:… (optional public key)" size="30" autocomplete="off"><button class="go" id="nbtn">Check key</button></div><div id="nres"></div></div>
 <h2>Your next 12 months</h2>
 <div id="tl"></div>
 <div id="list"></div>
@@ -207,6 +210,19 @@ else if(d.ok)ATT="🛡️ NEAR AI attestation report received: "+(d.nonceMatched
 else ATT="Attestation report could not be fetched ("+d.error+").";
 }catch(e){ATT="";ATTD=null}showAtt();renderEvidence()}
 
+/* ---------- NEAR agent key policy ---------- */
+let NEARK=null;
+$("nbtn").addEventListener("click",async()=>{
+const b=$("nbtn"),o=$("nres");b.disabled=true;o.innerHTML='<div class="empty">Asking the NEAR network…</div>';
+try{const r=await fetch("/api/agentkey",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({network:$("nnet").value,account:$("nacc").value.trim(),key:$("nkey").value.trim()})});
+const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"HTTP "+r.status);
+NEARK={network:d.network,account:d.account,publicKey:d.key,found:d.found,level:d.level,rows:d.rows,rpc:d.rpc,blockHeight:d.blockHeight,checked:new Date().toISOString()};
+const msg=d.list?(d.summary+(d.level==='ok'?'. All keys are limited.':'. Check that full-access keys belong only to you, and that the agent only holds a limited key.')):d.level==="ok"?"Safe: the agent can only call limited methods and cannot move your NEAR.":d.level==="warn"?"Check this: the key is not as tight as it could be.":"Dangerous: this key has full access to the account.";
+o.innerHTML='<div class="card" style="margin-top:10px">'+rows(d.rows.map(r=>[r[0],r[2]||r[1],r[1]]))+'</div><div class="verdict '+d.level+'">'+esc(msg)+'</div>';
+say("NEAR key check ("+d.network+"): "+msg,d.level)}
+catch(e){NEARK=null;o.innerHTML='<div class="note" style="background:var(--badbg)">'+esc(e.message)+'</div>'}
+b.disabled=false;renderEvidence()});
+
 /* ---------- evidence bundle ---------- */
 function bundle(){
 if(!sel)return null;
@@ -218,6 +234,7 @@ yourRule:{text:it.instruction,data:it.rule},
 agentProposal:{id:p.id,label:p.label,plan:p.plan,pageTheAgentRead:p.page},
 verifier:result?{mode:result.mode,finalVerdict:result.verdict,fixedRules:result.rules,nearAiCloud:result.ai||null,error:result.error||null}:null,
 attestation:att,
+agentKeyPolicyOnNear:NEARK,
 approvalReceipt:S.pi===pi&&S.rc?{time:S.rc.time,digestSha256:S.rc.digest,preimage:S.rc.preimage,howToCheck:"SHA-256 of the exact preimage string equals digestSha256."}:null,
 afterApproval:S.pi===pi?(S.ev||[]):[],orderOnServer:S.pi===pi&&S.order?{id:S.order.id,status:S.order.status,payMode:S.order.payMode,steps:S.order.steps}:null}}
 function evText(full){const b=bundle();if(!b)return"";return JSON.stringify(b,(k,v)=>!full&&k==="intelQuoteHex"&&typeof v==="string"&&v.length>96?v.slice(0,96)+"… ("+v.length/2+" bytes in the downloaded file)":v,2)}

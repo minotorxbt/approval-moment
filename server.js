@@ -6,6 +6,7 @@ import { ITEMS, ITEM_ORDER } from "./scenarios.js";
 import { verify, fetchAttestation } from "./verifier.js";
 import { check } from "./rules.js";
 import { chooseOffer } from "./agent.js";
+import { checkAgentKey } from "./near.js";
 import { createOrder, providerAction, expireOrder, buyerAction, userView, providerView } from "./orders.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -105,7 +106,7 @@ export async function runSuite({ ai, verifyImpl }) {
   return { summary: sum, results };
 }
 
-export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, agentImpl = chooseOffer, now = () => new Date() } = {}) {
+export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, agentImpl = chooseOffer, nearImpl = checkAgentKey, now = () => new Date() } = {}) {
   const orders = new Map();
   const watchers = new Set();
   const announce = (id) => { for (const w of watchers) w.write(`event: order\ndata: ${JSON.stringify({ id })}\n\n`); };
@@ -152,6 +153,13 @@ export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, 
         const out = await agentImpl({ instruction: item.instruction, offers });
         const ok = offers.some((o) => o.id === out.offerId);
         return send(res, 200, ok ? out : { mode: "fallback", offerId: offers[0].id, why: "Invalid agent answer, first offer used." });
+      }
+
+      if (post && p === "/api/agentkey") {
+        const body = await jsonBody(req, res);
+        if (!body) return;
+        const out = await nearImpl({ network: body.network, account: body.account, key: body.key });
+        return send(res, out.ok ? 200 : 400, out);
       }
 
       // Runs every demo proposal through the checks and compares with the answer a correct verifier should give.

@@ -5,6 +5,7 @@ import { verify, parseVerdict, fetchAttestation } from "../verifier.js";
 import { ITEMS, ITEM_ORDER } from "../scenarios.js";
 import { createApp, runSuite } from "../server.js";
 import { chooseOffer, parseChoice } from "../agent.js";
+import { checkAgentKey, judgeKey, judgeKeyList, validAccount, validKey } from "../near.js";
 
 const input = (item, proposal) => {
   const p = ITEMS[item].proposals.find((x) => x.id === proposal);
@@ -412,4 +413,74 @@ test("roles: the shop cannot mark a parcel as delivered, only the courier can", 
     const asCourierShip = await newOrder(base, "shoes", "normal");
     assert.equal((await act(base, asCourierShip.order.id, { action: "ship", role: "courier", tracking: "TR12345678" })).status, 400);
   });
+});
+
+// ---------- NEAR agent key policy (read-only) ----------
+const KEY = "ed25519:" + "3".repeat(44);
+const rpc = (result, status = 200) => async () => ({ ok: status === 200, status, json: async () => result });
+
+test("near: input is validated before any network call", async () => {
+  assert.ok(validAccount("alice.testnet") && validAccount("a-b_c.near"));
+  assert.ok(!validAccount("Alice.near") && !validAccount("a") && !validAccount("a..near") && !validAccount("https://x"));
+  assert.ok(validKey(KEY) && !validKey("ed25519:short") && !validKey("hello"));
+  let calls = 0;
+  const f = async () => { calls++; return { ok: true, json: async () => ({}) }; };
+  assert.equal((await checkAgentKey({ network: "evil", account: "a.near", key: KEY }, { fetchImpl: f })).ok, false);
+  assert.equal((await checkAgentKey({ network: "testnet", account: "bad account", key: KEY }, { fetchImpl: f })).ok, false);
+  assert.equal((await checkAgentKey({ network: "testnet", account: "a.testnet", key: "nope" }, { fetchImpl: f })).ok, false);
+  assert.equal(calls, 0);
+});
+
+test("near: full access is bad, a tight function-call key is ok, a loose one is a warning", async () => {
+  assert.equal(judgeKey("FullAccess").level, "bad");
+  const tight = { FunctionCall: { allowance: "250000000000000000000000", receiver_id: "pay.testnet", method_names: ["pay"] } };
+  assert.equal(judgeKey(tight).level, "ok");
+  assert.match(judgeKey(tight).rows.at(-1)[2], /0\.250 NEAR/);
+  assert.equal(judgeKey({ FunctionCall: { ...tight.FunctionCall, method_names: [] } }).level, "warn");
+  assert.equal(judgeKey({ FunctionCall: { ...tight.FunctionCall, allowance: null } }).level, "warn");
+  assert.equal(judgeKey({ Weird: 1 }).level, "warn");
+});
+
+test("near: reads the key from the RPC node, handles missing keys, errors and falls back to a second node", async () => {
+  const args = { network: "testnet", account: "alice.testnet", key: KEY };
+  const ok = await checkAgentKey(args, { fetchImpl: rpc({ result: { permission: "FullAccess", block_height: 7 } }) });
+  assert.equal(ok.level, "bad");
+  assert.equal(ok.blockHeight, 7);
+  const gone = await checkAgentKey(args, { fetchImpl: rpc({ result: { error: "access key does not exist while viewing" } }) });
+  assert.equal(gone.found, false);
+  assert.equal(gone.level, "warn");
+  const noAcc = await checkAgentKey(args, { fetchImpl: rpc({ error: { cause: { name: "UNKNOWN_ACCOUNT" } } }) });
+  assert.match(noAcc.rows[0][2], /does not exist/);
+  const urls = [];
+  const flaky = async (url) => { urls.push(url); if (urls.length === 1) throw new Error("down"); return { ok: true, json: async () => ({ result: { permission: "FullAccess" } }) }; };
+  assert.equal((await checkAgentKey(args, { fetchImpl: flaky })).ok, true);
+  assert.equal(urls.length, 2);
+  const dead = await checkAgentKey(args, { fetchImpl: rpc({}, 500) });
+  assert.equal(dead.ok, false);
+  assert.match(dead.error, /Could not reach/);
+});
+
+test("server: /api/agentkey passes only validated input to the NEAR check", async () => {
+  await withApp({ nearImpl: async (a) => ({ ok: true, network: a.network, account: a.account, key: a.key, found: true, level: "ok", rows: [] }) }, async (base) => {
+    const r = await post(base, "/api/agentkey", { network: "testnet", account: "alice.testnet", key: KEY });
+    assert.equal(r.status, 200);
+    assert.equal((await j(r)).level, "ok");
+  });
+  await withApp({}, async (base) => {
+    assert.equal((await post(base, "/api/agentkey", { network: "testnet", account: "http://evil", key: KEY })).status, 400);
+  });
+});
+
+test("near: without a key the whole key list is read and described", async () => {
+  const keys = [
+    { public_key: KEY, access_key: { permission: "FullAccess" } },
+    { public_key: "ed25519:" + "4".repeat(44), access_key: { permission: { FunctionCall: { allowance: "250000000000000000000000", receiver_id: "pay.testnet", method_names: ["pay"] } } } },
+  ];
+  const r = await checkAgentKey({ network: "testnet", account: "alice.testnet" }, { fetchImpl: rpc({ result: { keys, block_height: 9 } }) });
+  assert.equal(r.list, true);
+  assert.equal(r.rows.length, 2);
+  assert.equal(r.rows[0][1], "warn");
+  assert.equal(r.rows[1][1], "ok");
+  assert.match(r.summary, /1 full access, 1 limited/);
+  assert.equal(judgeKeyList([keys[1]]).level, "ok");
 });
