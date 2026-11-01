@@ -114,6 +114,14 @@ requests `GET /v1/attestation/report` with a fresh random nonce and the page sho
 - `public/index.html` the UI (timeline, shopping card, side panel with animation, evidence box)
 - `test/all.test.js` tests
 
+## Next steps (beyond the hackathon)
+
+The five obligations and the agent's offers are fixed demo data. In a real product the standing rule and the payment plan would come from outside (the user's calendar and bills, the agent's shopping request), and each new bill or purchase would be a new request checked against the user's rule by the same verifier. The same obligation can be paid only once. Other next steps: a real escrow contract on NEAR instead of a server-controlled testnet account, signed provider messages instead of the simulated provider portal, and NEAR Intents for cross-chain payments.
+
+## How this was made
+
+The idea, direction and testing are by the author. The code was written with the help of an AI assistant (Claude). The demo video voice-over is generated with AI.
+
 ## License
 
 MIT, see `LICENSE`.
