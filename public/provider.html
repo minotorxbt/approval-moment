@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Provider portal – Approval Moment demo</title>
+<style>
+:root{--bg:#f6f5f1;--card:#fff;--ink:#1c1b19;--mute:#6b6962;--line:#e3e0d8;--ok:#1f7a4d;--bad:#b3261e;--okbg:#e6f4ec;--badbg:#fde8e6;--acc:#2f4bd6}
+@media (prefers-color-scheme:dark){:root{--bg:#151513;--card:#201f1c;--ink:#f1efe9;--mute:#a09d94;--line:#34322d;--ok:#5fd08f;--bad:#ff8a80;--okbg:#17301f;--badbg:#3a1a18;--acc:#8ea2ff}}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:24px;margin:8px 0 4px}p.sub{color:var(--mute);margin:0 0 16px}
+.banner{background:var(--badbg);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+.top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}.top b{font-size:17px}
+.m{color:var(--mute);font-size:14px}code{font-family:ui-monospace,Menlo,monospace;font-size:13px}
+.step{display:flex;gap:10px;padding:6px 0;border-top:1px solid var(--line);font-size:14px}.step:first-child{border-top:0}
+.step i{font-style:normal;width:20px;text-align:center}.ok{color:var(--ok)}.bad{color:var(--bad)}
+form{margin-top:10px;display:grid;gap:8px}
+label{display:grid;gap:3px;font-size:14px}
+input,select{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+button{font:inherit;padding:10px 16px;border-radius:10px;border:1px solid var(--acc);background:var(--acc);color:#fff;cursor:pointer;justify-self:start}
+.err{color:var(--bad);font-size:14px;min-height:1.2em}
+.empty{color:var(--mute);padding:12px 0}
+</style>
+</head>
+<body>
+<main>
+<h1>Provider portal</h1>
+<p class="sub">Play the school, the insurer, the inspection center or the shop. Payments approved on the main page appear here. Whatever you confirm shows up on the user's screen immediately.</p>
+<div class="banner">Demo only. In a real system these confirmations would arrive as signed messages from the provider's own system, not from a web form.</div>
+<div id="orders"><div class="empty">Loading…</div></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const draft={};  // typed-but-unsent values survive re-rendering
+let busy=false;
+function field(o,f){
+const v=(draft[o.id]&&draft[o.id][f.name]!==undefined)?draft[o.id][f.name]:f.default;
+const id="f-"+o.id+"-"+f.name;
+if(f.type==="select")return '<label>'+esc(f.label)+'<select name="'+esc(f.name)+'">'+f.options.map(x=>'<option'+(String(x)===String(v)?' selected':'')+'>'+esc(x)+'</option>').join("")+'</select></label>';
+return '<label>'+esc(f.label)+'<input name="'+esc(f.name)+'" type="'+esc(f.type)+'" value="'+esc(v??"")+'"'+(f.type==="number"?' step="any"':'')+' autocomplete="off"></label>'}
+function card(o){
+const steps=o.steps.map(s=>'<div class="step"><i class="'+(s.state==="done"?"ok":s.state==="bad"?"bad":"")+'">'+(s.state==="done"?"✓":s.state==="bad"?"✗":"•")+'</i><span><b>'+esc(s.label)+'</b><br><span class="m">'+esc(s.detail)+'</span></span></div>').join("");
+const form=o.action?'<form data-id="'+esc(o.id)+'" data-action="'+esc(o.action.name)+'">'+o.action.fields.map(f=>field(o,f)).join("")+'<button>'+esc(o.action.button)+'</button><div class="err" role="alert"></div></form>':
+'<div class="m" style="margin-top:8px">'+(o.status==="open"?"Nothing to do right now.":"This order is closed ("+esc(o.status)+").")+'</div>';
+return '<div class="card"><div class="top"><b>'+esc(o.provider)+'</b><span class="m">'+esc(o.title)+' · $'+esc(o.price)+' · '+(o.payMode==="direct"?"paid directly":"held in escrow")+'</span></div>'+
+'<div class="m">Payee account <code>'+esc(o.payee)+'</code> · reference <code>'+esc(o.ref)+'</code></div><div style="margin-top:8px">'+steps+'</div>'+form+'</div>'}
+async function load(){
+if(busy)return;
+// do not re-render while someone is typing in a form
+if(document.activeElement&&document.activeElement.closest&&document.activeElement.closest("form"))return;
+try{const r=await fetch("/api/provider/orders");const d=await r.json();
+$("orders").innerHTML=d.orders.length?d.orders.map(card).join(""):'<div class="empty">No payments yet. Approve one on the main page (http://localhost:3000) and it will appear here.</div>'}
+catch(e){$("orders").innerHTML='<div class="empty">Could not reach the server.</div>'}}
+$("orders").addEventListener("input",e=>{const f=e.target.closest("form");if(!f)return;(draft[f.dataset.id]||(draft[f.dataset.id]={}))[e.target.name]=e.target.value});
+$("orders").addEventListener("submit",async e=>{
+e.preventDefault();const f=e.target,body={action:f.dataset.action};
+new FormData(f).forEach((v,k)=>{body[k]=v});
+busy=true;
+try{const r=await fetch("/api/provider/orders/"+f.dataset.id+"/action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+const d=await r.json();
+if(!r.ok){f.querySelector(".err").textContent=d.error||"Error "+r.status;return}
+delete draft[f.dataset.id]}
+catch(x){f.querySelector(".err").textContent="Could not reach the server.";return}
+finally{busy=false}
+if(document.activeElement)document.activeElement.blur();
+load()});
+try{const es=new EventSource("/api/stream");es.addEventListener("order",load)}catch(e){}
+load();
+</script>
+</body>
+</html>

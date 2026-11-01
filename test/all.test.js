@@ -2,20 +2,48 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { check, scanHidden } from "../rules.js";
 import { verify, parseVerdict, fetchAttestation } from "../verifier.js";
-import { INS, SCENARIOS } from "../scenarios.js";
+import { ITEMS, ITEM_ORDER } from "../scenarios.js";
 import { createApp } from "../server.js";
 
-const input = (id) => ({ ins: INS, plan: SCENARIOS[id].plan, page: SCENARIOS[id].page });
+const input = (item, proposal) => {
+  const p = ITEMS[item].proposals.find((x) => x.id === proposal);
+  return { ins: ITEMS[item].rule, plan: p.plan, page: p.page };
+};
+const rulesVerdict = (item, proposal) => { const i = input(item, proposal); return check(i.ins, i.plan, i.page).verdict; };
 const fakeAI = (content, status = 200) => async () => ({ ok: status === 200, status, json: async () => ({ choices: [{ message: { content } }] }) });
 
-test("rules: the three demo scenarios", () => {
-  assert.equal(check(INS, SCENARIOS.normal.plan, SCENARIOS.normal.page).verdict, "ok");
-  assert.equal(check(INS, SCENARIOS.size.plan, SCENARIOS.size.page).verdict, "warn");
-  assert.equal(check(INS, SCENARIOS.hijacked.plan, SCENARIOS.hijacked.page).verdict, "bad");
+test("rules: every demo proposal gets the verdict the story needs", () => {
+  const expected = {
+    "health/best": "ok", "health/newaccount": "bad",
+    "car/sat": "ok", "car/tue": "warn",
+    "school/normal": "ok", "school/latefee": "warn",
+    "home/renew": "ok", "home/broker": "bad",
+    "shoes/normal": "ok", "shoes/size": "warn", "shoes/hijacked": "bad",
+  };
+  for (const [key, want] of Object.entries(expected)) {
+    const [item, proposal] = key.split("/");
+    assert.equal(rulesVerdict(item, proposal), want, key);
+  }
+  assert.equal(ITEM_ORDER.length, 5);
 });
 
-test("rules: price over the limit is bad", () => {
-  assert.equal(check(INS, { ...SCENARIOS.normal.plan, price: 81 }, {}).verdict, "bad");
+test("rules: price above the limit is bad, above expected but within the limit is a warning", () => {
+  const i = input("school", "normal");
+  assert.equal(check(i.ins, { ...i.plan, price: 401 }, {}).verdict, "bad");
+  assert.equal(check(i.ins, { ...i.plan, price: 380 }, {}).verdict, "warn");
+  assert.equal(check(i.ins, { ...i.plan, price: 350 }, {}).verdict, "ok");
+});
+
+test("rules: rows carry [label, level, detail]", () => {
+  const { rows } = check(...Object.values(input("car", "tue")));
+  assert.ok(rows.every((r) => r.length === 3 && ["ok", "warn", "bad"].includes(r[1]) && typeof r[2] === "string"));
+  assert.deepEqual(rows.find((r) => r[0] === "Appointment").slice(0, 2), ["Appointment", "warn"]);
+});
+
+test("rules: a product attribute that differs is a warning and names what was asked", () => {
+  const { rows } = check(...Object.values(input("shoes", "size")));
+  assert.deepEqual(rows.find((r) => r[0] === "Size"), ["Size", "warn", "43 (you asked for 42)"]);
+  assert.deepEqual(rows.find((r) => r[0] === "Color").slice(0, 2), ["Color", "ok"]);
 });
 
 test("rules: hidden text is suspicious, instruction-like hidden text is an attack", () => {
@@ -25,25 +53,27 @@ test("rules: hidden text is suspicious, instruction-like hidden text is an attac
 });
 
 test("verify: no key means demo mode (rules only)", async () => {
-  const r = await verify(input("normal"), { apiKey: "" });
+  const r = await verify(input("health", "best"), { apiKey: "" });
   assert.equal(r.mode, "demo");
   assert.equal(r.verdict, "ok");
 });
 
 test("verify: AI can make the verdict stricter", async () => {
-  const r = await verify(input("normal"), { apiKey: "k", fetchImpl: fakeAI('{"verdict":"warn","reasons":["x"]}') });
+  const r = await verify(input("health", "best"), { apiKey: "k", fetchImpl: fakeAI('{"verdict":"warn","reasons":["x"]}') });
   assert.equal(r.mode, "live");
   assert.equal(r.verdict, "warn");
+  assert.equal(r.ai.raw, '{"verdict":"warn","reasons":["x"]}');
+  assert.ok(r.ai.model);
 });
 
 test("verify: AI can never loosen a rules verdict (even if the page fooled it)", async () => {
-  const r = await verify(input("hijacked"), { apiKey: "k", fetchImpl: fakeAI('{"verdict":"ok","reasons":["fine"]}') });
+  const r = await verify(input("health", "newaccount"), { apiKey: "k", fetchImpl: fakeAI('{"verdict":"ok","reasons":["fine"]}') });
   assert.equal(r.verdict, "bad");
 });
 
 test("verify: bad reply, HTTP error and network error fall back to rules-only", async () => {
   for (const f of [fakeAI("not json"), fakeAI("{}", 500), async () => { throw new Error("offline"); }]) {
-    const r = await verify(input("size"), { apiKey: "k", fetchImpl: f });
+    const r = await verify(input("car", "tue"), { apiKey: "k", fetchImpl: f });
     assert.equal(r.mode, "rules-only");
     assert.equal(r.verdict, "warn");
     assert.ok(r.error);
@@ -53,25 +83,6 @@ test("verify: bad reply, HTTP error and network error fall back to rules-only", 
 test("parseVerdict: extracts JSON from surrounding text and rejects bad verdicts", () => {
   assert.deepEqual(parseVerdict('here: {"verdict":"bad","reasons":["a","b","c","d"]} ok'), { verdict: "bad", reasons: ["a", "b", "c"] });
   assert.equal(parseVerdict('{"verdict":"maybe"}'), null);
-});
-
-test("server: /api/check works, rejects unknown scenarios and oversized bodies", async () => {
-  const app = createApp({ verifyImpl: (i) => verify(i, { apiKey: "" }) });
-  await new Promise((r) => app.listen(0, "127.0.0.1", r));
-  const base = `http://127.0.0.1:${app.address().port}`;
-  const post = (body) => fetch(`${base}/api/check`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
-  try {
-    const ok = await post(JSON.stringify({ scenario: "hijacked" }));
-    assert.equal(ok.status, 200);
-    assert.equal((await ok.json()).verdict, "bad");
-    assert.equal((await post(JSON.stringify({ scenario: "__proto__" }))).status, 400);
-    assert.equal((await post("x".repeat(5000))).status, 413);
-    const page = await fetch(base + "/");
-    assert.equal(page.status, 200);
-    assert.match(await page.text(), /Approval Moment/);
-  } finally {
-    app.close();
-  }
 });
 
 const reportFetch = (mutate = (g) => g, status = 200) => async (url) => {
@@ -89,6 +100,8 @@ test("attestation: report with our nonce and a quote is accepted but never marke
   assert.equal(r.ok, true);
   assert.equal(r.nonceMatched, true);
   assert.equal(r.quoteBytes, 4);
+  assert.equal(r.quote, "0a1b2c3d");
+  assert.equal(r.requestNonce.length, 64);
   assert.equal(r.signatureVerified, false);
 });
 
@@ -99,14 +112,164 @@ test("attestation: wrong nonce is reported, missing quote and HTTP errors fail c
   assert.equal((await fetchAttestation({ apiKey: "k", fetchImpl: async () => { throw new Error("offline"); } })).ok, false);
 });
 
-test("server: /api/attestation returns what the attestation function returns", async () => {
-  const app = createApp({ attestImpl: async () => ({ mode: "live", ok: true, nonceMatched: true, quoteBytes: 4, signingAlgo: "ecdsa", modelReports: 1, signatureVerified: false }) });
+async function withApp(opts, fn) {
+  const app = createApp(opts);
   await new Promise((r) => app.listen(0, "127.0.0.1", r));
-  try {
-    const res = await fetch(`http://127.0.0.1:${app.address().port}/api/attestation`);
+  try { await fn(`http://127.0.0.1:${app.address().port}`); } finally { app.closeAllConnections(); app.close(); }
+}
+
+test("server: /api/state lists the obligations and the one-off purchase relative to the injected date", async () => {
+  await withApp({ now: () => new Date("2026-11-01T10:00:00Z") }, async (base) => {
+    const s = await (await fetch(`${base}/api/state`)).json();
+    assert.equal(s.today, "2026-11-01");
+    assert.deepEqual(s.items.map((i) => i.id), ["health", "car", "school", "home", "shoes"]);
+    assert.deepEqual(s.items.filter((i) => i.oneOff).map((i) => i.id), ["shoes"]);
+    assert.ok(s.items.every((i) => i.proposals.length >= 2 && i.payMode && i.provider && i.instruction));
+  });
+});
+
+test("server: /api/check works, rejects unknown items, bad bodies and oversized bodies", async () => {
+  await withApp({ verifyImpl: (i) => verify(i, { apiKey: "" }) }, async (base) => {
+    const post = (body) => fetch(`${base}/api/check`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    const ok = await post(JSON.stringify({ item: "health", proposal: "newaccount" }));
+    assert.equal(ok.status, 200);
+    assert.equal((await ok.json()).verdict, "bad");
+    assert.equal((await post(JSON.stringify({ item: "__proto__", proposal: "x" }))).status, 400);
+    assert.equal((await post(JSON.stringify({ item: "health", proposal: "nope" }))).status, 400);
+    assert.equal((await post("null")).status, 400);
+    assert.equal((await post("{not json")).status, 400);
+    assert.equal((await post("x".repeat(5000))).status, 413);
+    const page = await fetch(base + "/");
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /Approval Moment/);
+  });
+});
+
+test("server: /api/attestation returns what the attestation function returns", async () => {
+  await withApp({ attestImpl: async () => ({ mode: "live", ok: true, nonceMatched: true, quoteBytes: 4, signingAlgo: "ecdsa", modelReports: 1, signatureVerified: false }) }, async (base) => {
+    const res = await fetch(`${base}/api/attestation`);
     assert.equal(res.status, 200);
     assert.equal((await res.json()).nonceMatched, true);
-  } finally {
-    app.close();
-  }
+  });
+});
+
+// ---------- orders and the provider portal ----------
+const DIGEST = "a".repeat(64);
+const post = (base, path, body) => fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
+const j = (r) => r.json();
+async function newOrder(base, item, proposal) {
+  const r = await post(base, "/api/orders", { item, proposal, digest: DIGEST });
+  return { status: r.status, order: await j(r) };
+}
+const act = (base, id, body) => post(base, `/api/provider/orders/${id}/action`, body);
+
+test("orders: a blocked plan can never become an order", async () => {
+  await withApp({}, async (base) => {
+    for (const [i, p] of [["health", "newaccount"], ["home", "broker"], ["shoes", "hijacked"]]) assert.equal((await newOrder(base, i, p)).status, 409);
+    assert.equal((await post(base, "/api/orders", { item: "school", proposal: "normal", digest: "nope" })).status, 400);
+    assert.equal((await post(base, "/api/orders", { item: "x", proposal: "normal", digest: DIGEST })).status, 400);
+  });
+});
+
+test("orders: school is paid directly and completes when the school confirms the right amount", async () => {
+  await withApp({}, async (base) => {
+    const { order } = await newOrder(base, "school", "normal");
+    assert.equal(order.payMode, "direct");
+    assert.match(order.steps[0].label, /directly/);
+    const list = (await j(await fetch(`${base}/api/provider/orders`))).orders;
+    assert.equal(list[0].provider, "Greenfield School");
+    assert.equal(list[0].action.fields[0].default, 350);
+    assert.equal((await act(base, order.id, { action: "issue" })).status, 400);
+    assert.equal((await act(base, order.id, { action: "confirm", amount: "abc" })).status, 400);
+    assert.equal((await act(base, order.id, { action: "confirm", amount: 350 })).status, 200);
+    const done = await j(await fetch(`${base}/api/orders/${order.id}`));
+    assert.equal(done.status, "completed");
+    assert.equal(done.canExpire, false);
+    assert.equal((await act(base, order.id, { action: "confirm", amount: 350 })).status, 400);
+  });
+});
+
+test("orders: a receipt for a different amount opens a dispute", async () => {
+  await withApp({}, async (base) => {
+    const { order } = await newOrder(base, "school", "normal");
+    await act(base, order.id, { action: "confirm", amount: 385 });
+    assert.equal((await j(await fetch(`${base}/api/orders/${order.id}`))).status, "dispute");
+  });
+});
+
+test("orders: insurance policy with the wrong cover opens a dispute, the right cover completes", async () => {
+  await withApp({}, async (base) => {
+    const a = (await newOrder(base, "health", "best")).order;
+    await act(base, a.id, { action: "issue", policyNo: "P-12345", cover: "Basic" });
+    assert.equal((await j(await fetch(`${base}/api/orders/${a.id}`))).status, "dispute");
+    const b = (await newOrder(base, "health", "best")).order;
+    await act(base, b.id, { action: "issue", policyNo: "P-12345", cover: "Plus" });
+    assert.equal((await j(await fetch(`${base}/api/orders/${b.id}`))).status, "completed");
+  });
+});
+
+test("orders: inspection needs a confirmation, then a pass with a long enough certificate", async () => {
+  await withApp({ now: () => new Date("2026-11-01T10:00:00Z") }, async (base) => {
+    const { order } = await newOrder(base, "car", "sat");
+    assert.equal(order.payMode, "escrow");
+    assert.equal((await act(base, order.id, { action: "complete", result: "Passed", validUntil: "2027-11-01" })).status, 400);
+    assert.equal((await act(base, order.id, { action: "confirm", code: "INS-1234" })).status, 200);
+    await act(base, order.id, { action: "complete", result: "Passed", validUntil: "2027-11-01" });
+    assert.equal((await j(await fetch(`${base}/api/orders/${order.id}`))).status, "completed");
+    const bad = (await newOrder(base, "car", "sat")).order;
+    await act(base, bad.id, { action: "confirm", code: "INS-1234" });
+    await act(base, bad.id, { action: "complete", result: "Passed", validUntil: "2026-12-01" });
+    assert.equal((await j(await fetch(`${base}/api/orders/${bad.id}`))).status, "dispute");
+  });
+});
+
+test("orders: shop flow needs the buyer's delivery code and checks the size", async () => {
+  await withApp({}, async (base) => {
+    const { order } = await newOrder(base, "shoes", "normal");
+    assert.match(order.buyerCode, /^\d{6}$/);
+    assert.equal((await act(base, order.id, { action: "ship", tracking: "bad" })).status, 400);
+    assert.equal((await act(base, order.id, { action: "ship", tracking: "TR12345678" })).status, 200);
+    const wrong = await act(base, order.id, { action: "deliver", deliveryCode: "000000", size: "42" });
+    assert.equal(wrong.status, 400);
+    assert.match((await j(wrong)).error, /delivery code/i);
+    await act(base, order.id, { action: "deliver", deliveryCode: order.buyerCode, size: "42" });
+    const done = await j(await fetch(`${base}/api/orders/${order.id}`));
+    assert.equal(done.status, "completed");
+    assert.equal(done.buyerCode, null);
+    const o2 = (await newOrder(base, "shoes", "normal")).order;
+    await act(base, o2.id, { action: "ship", tracking: "TR12345678" });
+    await act(base, o2.id, { action: "deliver", deliveryCode: o2.buyerCode, size: "43" });
+    assert.equal((await j(await fetch(`${base}/api/orders/${o2.id}`))).status, "dispute");
+  });
+});
+
+test("orders: timeout refunds an escrow order and disputes a direct payment, but only before the first reply", async () => {
+  await withApp({}, async (base) => {
+    const e = (await newOrder(base, "shoes", "normal")).order;
+    assert.equal(e.canExpire, true);
+    assert.equal((await j(await post(base, `/api/orders/${e.id}/expire`))).status, "refund");
+    const d = (await newOrder(base, "school", "normal")).order;
+    assert.equal((await j(await post(base, `/api/orders/${d.id}/expire`))).status, "dispute");
+    const s = (await newOrder(base, "shoes", "normal")).order;
+    await act(base, s.id, { action: "ship", tracking: "TR12345678" });
+    assert.equal((await post(base, `/api/orders/${s.id}/expire`)).status, 400);
+    assert.equal((await post(base, `/api/orders/${"0".repeat(16)}/expire`)).status, 404);
+    assert.equal((await fetch(`${base}/api/orders/zzz`)).status, 404);
+  });
+});
+
+test("server: /provider is served and /api/stream announces order changes", async () => {
+  await withApp({}, async (base) => {
+    assert.match(await (await fetch(`${base}/provider`)).text(), /Provider portal/);
+    const ctl = new AbortController();
+    const res = await fetch(`${base}/api/stream`, { signal: ctl.signal });
+    assert.match(res.headers.get("content-type"), /event-stream/);
+    const reader = res.body.getReader();
+    await reader.read(); // ": connected"
+    const { order } = await newOrder(base, "school", "normal");
+    let text = "";
+    while (!text.includes(order.id)) text += new TextDecoder().decode((await reader.read()).value);
+    assert.match(text, /event: order/);
+    ctl.abort();
+  });
 });

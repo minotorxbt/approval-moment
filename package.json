@@ -1,7 +1,7 @@
 {
   "name": "approval-moment",
   "version": "0.1.0",
-  "description": "A second, independent verifier that checks an AI shopping agent's payment plan against what the user asked for, before any money moves.",
+  "description": "A second, independent verifier that checks the payment plans of an AI agent that handles a person's yearly bills against the user's own rules, before any money moves.",
   "type": "module",
   "private": true,
   "license": "MIT",
