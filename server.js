@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { INS, SCENARIOS } from "./scenarios.js";
-import { verify } from "./verifier.js";
+import { verify, fetchAttestation } from "./verifier.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 try { process.loadEnvFile(path.join(here, ".env")); } catch { /* no .env file: demo mode */ }
@@ -32,7 +32,7 @@ function readBody(req) {
   });
 }
 
-export function createApp({ verifyImpl = verify } = {}) {
+export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation } = {}) {
   return http.createServer(async (req, res) => {
     try {
       if (req.method === "GET" && (req.url === "/" || req.url === "/index.html")) {
@@ -40,6 +40,9 @@ export function createApp({ verifyImpl = verify } = {}) {
       }
       if (req.method === "GET" && req.url === "/api/status") {
         return send(res, 200, { mode: process.env.NEAR_AI_API_KEY ? "live" : "demo" });
+      }
+      if (req.method === "GET" && req.url === "/api/attestation") {
+        return send(res, 200, await attestImpl());
       }
       if (req.method === "POST" && req.url === "/api/check") {
         let body;

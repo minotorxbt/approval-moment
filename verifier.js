@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { check, worst } from "./rules.js";
 
 const BASE = (process.env.NEAR_AI_BASE_URL || "https://cloud-api.near.ai/v1").replace(/\/$/, "");
@@ -64,5 +65,42 @@ export async function verify(input, { apiKey = process.env.NEAR_AI_API_KEY, fetc
     return { mode: "live", verdict: worst([rules.verdict, ai.verdict]), rules, ai };
   } catch (e) {
     return { mode: "rules-only", verdict: rules.verdict, rules, ai: null, error: String(e.message || e).slice(0, 120) };
+  }
+}
+
+// Asks NEAR AI Cloud for its TEE attestation report with a fresh random nonce.
+// This only checks what can be checked cheaply here: the call worked, the server echoed our nonce
+// (so the report is fresh) and an Intel TDX quote is present. It does NOT verify the Intel signature
+// or the measurements; that needs an external verifier (dcap-qvl or proof.t16z.com).
+export async function fetchAttestation({ apiKey = process.env.NEAR_AI_API_KEY, fetchImpl = globalThis.fetch, timeoutMs = 20000 } = {}) {
+  if (!apiKey) return { mode: "demo" };
+  const nonce = randomBytes(32).toString("hex");
+  const get = async (withModel) => {
+    const q = new URLSearchParams({ signing_algo: "ecdsa", nonce });
+    if (withModel) q.set("model", MODEL);
+    const res = await fetchImpl(`${BASE}/attestation/report?${q}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) throw new Error(`NEAR AI HTTP ${res.status}`);
+    return res.json();
+  };
+  try {
+    let data;
+    try { data = await get(true); } catch { data = await get(false); }
+    const g = data?.gateway_attestation;
+    const quote = typeof g?.intel_quote === "string" ? g.intel_quote.replace(/^0x/, "") : "";
+    if (!/^[0-9a-f]+$/i.test(quote)) throw new Error("no Intel TDX quote in the report");
+    return {
+      mode: "live",
+      ok: true,
+      nonceMatched: String(g.request_nonce || "").toLowerCase() === nonce,
+      quoteBytes: Math.floor(quote.length / 2),
+      signingAlgo: String(g.signing_algo || "").slice(0, 20),
+      modelReports: Array.isArray(data.model_attestations) ? data.model_attestations.length : 0,
+      signatureVerified: false,
+    };
+  } catch (e) {
+    return { mode: "live", ok: false, error: String(e.message || e).slice(0, 120) };
   }
 }

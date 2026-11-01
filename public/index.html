@@ -82,9 +82,16 @@ $("ins").innerHTML='<div class="b me">Buy red running shoes, size 42. Spend at m
 $("plan").innerHTML=rows([["Item",s.plan.item],["Color",s.plan.color],["Size",s.plan.size],["Price","$"+s.plan.price],["Pay to",s.plan.to]])+(s.note?'<div class="note">'+esc(s.note)+'</div>':'');
 $("chk").innerHTML=rows(c.r);
 $("page").innerHTML='<div class="pg"><b>'+esc(s.plan.item)+' \u00b7 '+esc(s.plan.color)+'</b><div>$'+s.plan.price+' \u00b7 Size '+s.plan.size+'</div><div class="m">Seller: '+esc(s.plan.seller)+'</div>'+(s.hid?'<div class="hid"><b>Text invisible to the eye (the assistant read it):</b><br>'+esc(s.hid)+'</div>':'')+'</div>';
-$("verdict").innerHTML='<div class="verdict '+c.lvl+'">'+T[c.lvl]+'</div><div id="ai"></div>';
+$("verdict").innerHTML='<div class="verdict '+c.lvl+'">'+T[c.lvl]+'</div><div id="ai"></div><div id="att"></div>';showAtt();
 $("ok").disabled=c.lvl==="bad";$("ok").textContent=c.lvl==="warn"?"Approve anyway":"Approve";
 $("out").innerHTML="";window.__lvl=c.lvl;dl=null;dlv();srv(s)}
+let ATT="";
+function showAtt(){const e=$("att");if(!e)return;e.textContent="";if(!ATT)return;const n=document.createElement("div");n.className="note";n.textContent=ATT;e.appendChild(n)}
+async function loadAtt(){try{const r=await fetch("/api/attestation");const d=await r.json();
+if(d.mode==="demo")ATT="";
+else if(d.ok)ATT="\ud83d\udee1\ufe0f NEAR AI attestation report received: "+(d.nonceMatched?"fresh nonce matched":"NONCE DID NOT MATCH")+", Intel TDX quote of "+d.quoteBytes+" bytes, signing "+d.signingAlgo+". This app does not verify the Intel signature itself; check the quote at proof.t16z.com.";
+else ATT="Attestation report could not be fetched ("+d.error+").";
+}catch(e){ATT=""}showAtt()}
 async function srv(s){
 const a=$("ai"),note=m=>{a.textContent="";const n=document.createElement("div");n.className="note";n.textContent=m;a.appendChild(n)};
 try{
@@ -94,7 +101,7 @@ const d=await r.json();
 if(S[cur]!==s)return;
 window.__lvl=d.verdict;$("ok").disabled=d.verdict==="bad";$("ok").textContent=d.verdict==="warn"?"Approve anyway":"Approve";
 const v=document.querySelector("#verdict .verdict");v.className="verdict "+d.verdict;v.textContent=T[d.verdict];
-note(d.mode==="live"?"\ud83d\udd12 NEAR AI Cloud verifier: "+((d.ai&&d.ai.reasons)||[]).join(" \u00b7 ")+" (hardware attestation is not shown yet)":d.mode==="rules-only"?"Could not reach NEAR AI Cloud; only the rules ran ("+d.error+")":"Demo mode: no NEAR AI key, only the rules ran.");
+note(d.mode==="live"?"\ud83d\udd12 NEAR AI Cloud verifier: "+((d.ai&&d.ai.reasons)||[]).join(" \u00b7 "):d.mode==="rules-only"?"Could not reach NEAR AI Cloud; only the rules ran ("+d.error+")":"Demo mode: no NEAR AI key, only the rules ran.");
 }catch(e){note("No server: the simple rules in your browser are running (simulation).")}}
 async function sha(t){try{const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(t));return[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("")}catch(e){return"could not compute"}}
 $("tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(b){cur=+b.dataset.i;render()}});
@@ -124,6 +131,7 @@ if(a==="wrong"){dl.st=4;dl.good=false;dl.end="dispute"}
 dlv()});
 $("ok").addEventListener("click",()=>{dl={st:1};dlv()});
 $("no").addEventListener("click",()=>{dl=null;dlv()});
+loadAtt();
 render();
 </script>
 </body>

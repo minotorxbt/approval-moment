@@ -27,7 +27,7 @@ A small web app plus an API that sits between a shopping agent and the payment:
 Requires Node.js 20.12 or newer. There are no dependencies to install.
 
 ```sh
-npm test        # 9 tests, see test/all.test.js
+npm test        # 13 tests, see test/all.test.js
 npm start       # then open http://localhost:3000
 ```
 
@@ -57,15 +57,15 @@ page text are processed in a TEE-backed environment rather than by a general-pur
 | --- | --- |
 | Rules engine, API, UI, receipt, delivery stepper | Working, covered by tests |
 | NEAR AI Cloud verifier | Implemented against the documented OpenAI-compatible API and unit-tested with a mocked response. Run by hand against the live service on 1 Nov 2026 (model `zai-org/GLM-5.1-FP8`): all three demo scenarios returned sensible reasons. If the call fails the app falls back to rules only and says so in the UI. |
-| TEE attestation shown to the user | **Not implemented.** The UI says so. |
+| TEE attestation | **Partly.** With a key set, the server asks `GET /v1/attestation/report` for a report with a fresh random nonce and the page shows whether the nonce was echoed and an Intel TDX quote is present. It does **not** verify the Intel signature or the measurements itself; the page tells the user to check the quote at proof.t16z.com. Unit-tested with mocked responses; not yet seen against the live endpoint. |
 | NEAR Intents payment / on-chain escrow | **Not implemented.** Payment, escrow, shipping and dispute pool are simulated in the page. |
 | Shops, carriers, real money | None. All scenarios are fixed demo data in `scenarios.js`. |
 
 ## Files
 
 - `rules.js` deterministic checks and the "only stricter" combination rule
-- `verifier.js` NEAR AI Cloud call, reply parsing, fallback modes (`demo`, `live`, `rules-only`)
-- `server.js` dependency-free HTTP server (binds to 127.0.0.1); `/api/check` accepts only a scenario id
+- `verifier.js` NEAR AI Cloud call, reply parsing, fallback modes (`demo`, `live`, `rules-only`), attestation report fetch
+- `server.js` dependency-free HTTP server (binds to 127.0.0.1); `/api/check` accepts only a scenario id, `/api/attestation` returns the attestation summary
 - `scenarios.js` demo instruction and three scenarios (`normal`, `size`, `hijacked`)
 - `public/index.html` the UI
 - `test/all.test.js` tests

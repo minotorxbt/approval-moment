@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { check, scanHidden } from "../rules.js";
-import { verify, parseVerdict } from "../verifier.js";
+import { verify, parseVerdict, fetchAttestation } from "../verifier.js";
 import { INS, SCENARIOS } from "../scenarios.js";
 import { createApp } from "../server.js";
 
@@ -69,6 +69,43 @@ test("server: /api/check works, rejects unknown scenarios and oversized bodies",
     const page = await fetch(base + "/");
     assert.equal(page.status, 200);
     assert.match(await page.text(), /Approval Moment/);
+  } finally {
+    app.close();
+  }
+});
+
+const reportFetch = (mutate = (g) => g, status = 200) => async (url) => {
+  const nonce = new URL(url).searchParams.get("nonce");
+  const g = mutate({ signing_address: "0xabc", signing_algo: "ecdsa", intel_quote: "0a1b2c3d", event_log: "[]", report_data: "00", request_nonce: nonce, info: {} });
+  return { ok: status === 200, status, json: async () => ({ gateway_attestation: g, model_attestations: [{}] }) };
+};
+
+test("attestation: no key means demo mode and no network call", async () => {
+  assert.deepEqual(await fetchAttestation({ apiKey: "", fetchImpl: async () => { throw new Error("must not be called"); } }), { mode: "demo" });
+});
+
+test("attestation: report with our nonce and a quote is accepted but never marked as verified", async () => {
+  const r = await fetchAttestation({ apiKey: "k", fetchImpl: reportFetch() });
+  assert.equal(r.ok, true);
+  assert.equal(r.nonceMatched, true);
+  assert.equal(r.quoteBytes, 4);
+  assert.equal(r.signatureVerified, false);
+});
+
+test("attestation: wrong nonce is reported, missing quote and HTTP errors fail cleanly", async () => {
+  assert.equal((await fetchAttestation({ apiKey: "k", fetchImpl: reportFetch((g) => ({ ...g, request_nonce: "00" })) })).nonceMatched, false);
+  assert.equal((await fetchAttestation({ apiKey: "k", fetchImpl: reportFetch((g) => ({ ...g, intel_quote: "zz" })) })).ok, false);
+  assert.equal((await fetchAttestation({ apiKey: "k", fetchImpl: reportFetch((g) => g, 401) })).ok, false);
+  assert.equal((await fetchAttestation({ apiKey: "k", fetchImpl: async () => { throw new Error("offline"); } })).ok, false);
+});
+
+test("server: /api/attestation returns what the attestation function returns", async () => {
+  const app = createApp({ attestImpl: async () => ({ mode: "live", ok: true, nonceMatched: true, quoteBytes: 4, signingAlgo: "ecdsa", modelReports: 1, signatureVerified: false }) });
+  await new Promise((r) => app.listen(0, "127.0.0.1", r));
+  try {
+    const res = await fetch(`http://127.0.0.1:${app.address().port}/api/attestation`);
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).nonceMatched, true);
   } finally {
     app.close();
   }
