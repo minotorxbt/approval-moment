@@ -6,7 +6,7 @@ import { ITEMS, ITEM_ORDER } from "./scenarios.js";
 import { verify, fetchAttestation } from "./verifier.js";
 import { check } from "./rules.js";
 import { chooseOffer } from "./agent.js";
-import { createOrder, providerAction, expireOrder, userView, providerView } from "./orders.js";
+import { createOrder, providerAction, expireOrder, buyerAction, userView, providerView } from "./orders.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 try { process.loadEnvFile(path.join(here, ".env")); } catch { /* no .env file: demo mode */ }
@@ -76,13 +76,15 @@ export async function runSuite({ ai, verifyImpl }) {
       const i = next++;
       const { item, p } = cases[i];
       const input = { ins: item.rule, plan: p.plan, page: p.page };
-      const rules = check(input.ins, input.plan, input.page).verdict;
+      const chk = check(input.ins, input.plan, input.page);
+      const rules = chk.verdict;
+      const why = chk.rows.filter((r) => r[1] !== "ok").map((r) => `${r[0]}: ${r[2]}`).slice(0, 3);
       let final = rules, aiVerdict = null, mode = "rules";
       if (ai) {
         const v = await verifyImpl(input);
         mode = v.mode; final = v.verdict; aiVerdict = v.ai ? v.ai.verdict : null;
       }
-      results[i] = { item: item.id, proposal: p.id, label: p.label, truth: p.truth, rules, ai: aiVerdict, final, mode, match: final === p.truth };
+      results[i] = { item: item.id, proposal: p.id, label: p.label, why, truth: p.truth, rules, ai: aiVerdict, final, mode, match: final === p.truth };
     }
   };
   await Promise.all(Array.from({ length: ai ? 4 : 1 }, worker));
@@ -190,6 +192,17 @@ export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, 
         return send(res, 200, userView(o));
       }
 
+      m = p.match(/^\/api\/orders\/([0-9a-f]{16})\/buyer$/);
+      if (post && m) {
+        const o = orders.get(m[1]);
+        if (!o) return send(res, 404, { error: "order not found" });
+        const body = await jsonBody(req, res);
+        if (!body) return;
+        try { buyerAction(o, String(body.action), now()); } catch (e) { return send(res, e.code || 500, { error: e.message }); }
+        announce(o.id);
+        return send(res, 200, userView(o));
+      }
+
       if (get && p === "/api/provider/orders") {
         const list = [...orders.values()].reverse().map((o) => providerView(o, now()));
         return send(res, 200, { orders: list });
@@ -201,7 +214,7 @@ export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, 
         const body = await jsonBody(req, res);
         if (!body) return;
         if (typeof body.action !== "string") return send(res, 400, { error: "missing action" });
-        try { providerAction(o, body.action, body, now()); } catch (e) { return send(res, e.code || 500, { error: e.message }); }
+        try { providerAction(o, body.action, body, now(), body.role === "courier" ? "courier" : "provider"); } catch (e) { return send(res, e.code || 500, { error: e.message }); }
         announce(o.id);
         return send(res, 200, providerView(o, now()));
       }

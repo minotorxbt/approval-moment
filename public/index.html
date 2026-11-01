@@ -99,9 +99,9 @@ const $=id=>document.getElementById(id);
 const esc=t=>String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const DAY=864e5;
 const T={ok:"OK: the plan matches your rule.",warn:"Warning: the plan differs from your rule.",bad:"Blocked: this payment does not match your rule and will not be made."};
-const LABEL={idle:["","Waiting"],ready:["ok","Ready to approve"],attention:["warn","Needs your attention"],blocked:["bad","Blocked"],escrow:["ok","In escrow"],sent:["ok","Payment sent"],paid:["ok","Completed"],refund:["warn","Refunded"],dispute:["bad","In dispute"],rejected:["","Rejected"]};
-const FINAL=["escrow","sent","paid","refund","dispute"];
-const RE="Escrow rule: if the provider does not confirm within 3 days, the payment is refunded automatically. (Simulation: in a live version the escrow would be a contract on NEAR.)";
+const LABEL={idle:["","Waiting"],ready:["ok","Ready to approve"],attention:["warn","Needs your attention"],blocked:["bad","Blocked"],escrow:["ok","In escrow"],sent:["ok","Payment sent"],paid:["ok","Completed"],refund:["warn","Refunded"],dispute:["bad","In dispute"],rejected:["","Rejected"],holding:["warn","Confirm receipt"]};
+const FINAL=["escrow","holding","sent","paid","refund","dispute"];
+const RE="Escrow rules: if the provider does not confirm within 3 days, the payment is refunded automatically. After delivery the money is released only when you confirm, or after 2 days without a complaint. (Simulation: in a live version the escrow would be a contract on NEAR.)";
 const RD="Direct payment: this is a saved payee with a due date, so the money goes straight to them. If they never confirm, a dispute is opened with your receipt as evidence.";
 let ST=null,list=[],status={},sess={},sel=null,pi=0,seq=0,ATT="",ATTD=null,result=null,story=[];
 const item=id=>ST.items.find(x=>x.id===id);
@@ -260,7 +260,7 @@ if(FINAL.includes(st(sel)))return;
 status[sel]="rejected";$("out").innerHTML='<div class="card" style="margin-top:14px">Rejected. No payment was made.</div>';sess[sel].order=null;dlv();renderList();
 flow(0,"warn");say("You rejected the plan. No payment was made and nothing left your account.","warn")}
 
-function ordStatus(o){return o.status==="completed"?"paid":o.status==="open"?(o.payMode==="direct"?"sent":"escrow"):o.status}
+function ordStatus(o){return o.status==="completed"?"paid":o.status==="holding"?"holding":o.status==="open"?(o.payMode==="direct"?"sent":"escrow"):o.status}
 function dlv(){
 const e=$("dlv"),S=sess[sel],o=S&&S.pi===pi?S.order:null;if(!o){e.innerHTML="";return}
 const L=o.steps.map((x,i)=>[(i+1)+". "+x.label,x.detail,x.state==="done"?"ok":x.state==="bad"?"bad":""]);
@@ -268,15 +268,17 @@ let b="";
 if(o.status==="open"){
 b='<a class="btnlink" href="/provider" target="_blank" rel="noopener">Open the provider portal ↗</a>';
 if(o.canExpire)b+='<button data-a="expire">Simulate: 3 days pass without confirmation</button>'}
+if(o.canConfirm)b='<button class="go" data-a="accept">I received it, all good</button><button data-a="report">Report a problem</button><button data-a="timeout">Simulate: 2 days pass without a complaint</button>';
 const code=o.buyerCode?'<div class="note" style="margin-top:12px"><b>Your delivery code: <code>'+esc(o.buyerCode)+'</code></b><br>Give it to the courier only at your door. The shop cannot mark the parcel as delivered without it.</div>':"";
-const M={completed:["ok","Completed. "+(o.payMode==="escrow"?"The escrow released the money to the provider.":"The provider confirmed and the verifier accepted the proof.")],refund:["warn","Your money was refunded; nothing was paid to the provider."],dispute:["bad","Dispute opened: your approval receipt and rule were sent as evidence (simulated)."+(o.payMode==="escrow"?" The payment stays in escrow until a decision.":"")]};
+const M={completed:["ok","Completed. "+(o.payMode==="escrow"?"The escrow released the money to the provider after your confirmation.":"The provider confirmed and the verifier accepted the proof.")],refund:["warn","Your money was refunded; nothing was paid to the provider."],dispute:["bad","Dispute opened: your approval receipt and rule were sent as evidence (simulated)."+(o.payMode==="escrow"?" The payment stays in escrow until a decision.":"")]};
 const r=M[o.status]?'<div class="verdict '+M[o.status][0]+'">'+esc(M[o.status][1])+'</div>':"";
+const hold=o.canConfirm?'<div class="verdict warn">The provider\'s proof matched your rule, but the money is still in escrow. Check what you received, then confirm or report a problem.</div>':"";
 const wait=o.status==="open"&&o.waitingFor?'<div class="m" style="color:var(--mute);font-size:14px;margin-top:8px">Waiting for '+esc(o.provider)+': “'+esc(o.waitingFor)+'”. Their answer appears here by itself.</div>':"";
-e.innerHTML='<h2>6. After you approve</h2><div class="card">'+rows(L)+'<div class="note">'+esc(o.payMode==="escrow"?RE:RD)+'</div></div>'+code+wait+(b?'<div class="actions">'+b+'</div>':'')+r}
+e.innerHTML='<h2>6. After you approve</h2><div class="card">'+rows(L)+'<div class="note">'+esc(o.payMode==="escrow"?RE:RD)+'</div></div>'+hold+code+wait+(b?'<div class="actions">'+b+'</div>':'')+r}
 
 function stage(a){
-const S=sess[sel],o=S&&S.pi===pi?S.order:null;if(!o||a!=="expire")return;
-fetch("/api/orders/"+o.id+"/expire",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}).then(r=>r.json()).then(d=>{if(d.error)say(d.error,"warn")}).catch(()=>say("Could not reach the server.","warn"))}
+const S=sess[sel],o=S&&S.pi===pi?S.order:null;if(!o||!["expire","accept","report","timeout"].includes(a))return;
+fetch("/api/orders/"+o.id+(a==="expire"?"/expire":"/buyer"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:a})}).then(r=>r.json()).then(d=>{if(d.error)say(d.error,"warn")}).catch(()=>say("Could not reach the server.","warn"))}
 
 async function askAgent(btn){
 const id=sel;btn.disabled=true;btn.textContent="The agent is reading the offers…";
@@ -299,9 +301,11 @@ for(const ev of evs){S.ev.push({time:ev.time,actor:ev.actor,event:ev.action,data
 if(ev.actor==="provider"){const step=o.steps.find(x=>x.key===ev.action);
 say("Message from "+o.provider+": "+(step?step.label+". "+step.detail:ev.action)+"."+(o.payMode==="escrow"?" The money is still in escrow.":""));if(o.status==="open")flow(o.payMode==="escrow"?3:4,"ok")}
 if(ev.actor==="verifier"){say("The verifier compared the proof with your rule: "+ev.data.detail+".",ev.data.ok?"ok":"bad");
-if(ev.data.ok)flow(4,"ok");else flow(o.payMode==="escrow"?3:4,"bad");
-say(ev.data.ok?(o.payMode==="escrow"?"The escrow released the money to the provider. Done.":"Done. Nothing more to do."):"A dispute was opened with your receipt and rule as evidence.",ev.data.ok?"ok":"bad")}
-if(ev.actor==="system"){flow(o.status==="refund"?0:4,o.status==="refund"?"warn":"bad");
+if(ev.data.ok)flow(o.payMode==="escrow"?3:4,"ok");else flow(o.payMode==="escrow"?3:4,"bad");
+say(ev.data.ok?(o.payMode==="escrow"?"The proof matches, but the money stays in escrow until YOU confirm that you received what you ordered.":"Done. Nothing more to do."):"A dispute was opened with your receipt and rule as evidence.",ev.data.ok?"ok":"bad")}
+if(ev.actor==="buyer"){if(ev.action==="accept"){flow(4,"ok");say("You confirmed. The escrow released the money to the provider. Done.","ok")}else{flow(3,"bad");say("You reported a problem. The money stays in escrow and a dispute was opened with your receipt and rule as evidence.","bad")}}
+if(ev.actor==="system"&&ev.action==="autorelease"){flow(4,"ok");say("Two days passed without a complaint, so the escrow released the money to the provider. Done.","ok")}
+if(ev.actor==="system"&&ev.action==="timeout"){flow(o.status==="refund"?0:4,o.status==="refund"?"warn":"bad");
 say(o.status==="refund"?"The provider did not confirm in 3 days. The escrow rule refunded your money automatically.":"The provider did not confirm in 3 days. A dispute was opened with your receipt as evidence.","warn")}}
 renderList();if(sel===key){dlv();renderEvidence()}}
 try{const es=new EventSource("/api/stream");es.addEventListener("order",m=>{try{refreshOrder(JSON.parse(m.data).id)}catch(e){}})}catch(e){}

@@ -22,7 +22,7 @@ A small web app plus an API that sits between a bill-paying agent and the paymen
    - Deterministic rules (`rules.js`) are the safety floor: item, price limit, expected price, appointment time, payee account, payee reputation, hidden instruction-like text on the page.
    - A model on **NEAR AI Cloud** (`verifier.js`) gives a second opinion. It can only make the verdict **stricter**, never looser, so a page that fools the model still cannot turn a rules `bad` into `ok`.
 4. `bad` blocks the approve button. Otherwise the user approves and gets a receipt (SHA-256 of rule, plan and verdict).
-5. After approval, an order is created on the server and a separate **provider portal** (`/provider`) plays the other side: the school, insurer, inspection center or shop sees the incoming payment and submits its proof (receipt, policy number, confirmation code, tracking code, delivery code). The proof appears on the user's screen instantly, and the verifier compares it with the rule. Known payees with a due date (school, insurers) are paid **directly**; purchases and bookings use **escrow** (automatic refund if the provider never answers). A wrong result opens a dispute with the receipt as evidence. For purchases the buyer gets a 6-digit delivery code the courier must enter.
+5. After approval, an order is created on the server and a separate **provider portal** (`/provider`) plays the other side: the school, insurer, inspection center or shop sees the incoming payment and submits its proof (receipt, policy number, confirmation code, tracking code, delivery code). The proof appears on the user's screen instantly, and the verifier compares it with the rule. Known payees with a due date (school, insurers) are paid **directly**; purchases and bookings use **escrow** (automatic refund if the provider never answers). A wrong result opens a dispute with the receipt as evidence. For purchases the buyer gets a 6-digit delivery code that only the courier role can enter. With escrow the money is released only after the buyer confirms ("I received it"), or after 2 days without a complaint; "Report a problem" opens a dispute and the money stays in escrow.
 6. Besides the yearly bills, the user can ask the agent to **buy something right now** (red running shoes, size 42, max $80). The same verifier checks colour, size, price and payee.
 7. A side panel explains each step in plain words and animates the path You, Agent, Verifier, Escrow, Provider. A blocked payment stops at the verifier.
 8. Every decision comes with an **Evidence** box: the rule, the plan, the page text, each fixed-rule result, the raw NEAR AI reply, the attestation report (including the Intel quote, ready to paste into proof.t16z.com) and the receipt with the exact text that was hashed. It can be copied or downloaded as JSON.
@@ -51,7 +51,7 @@ Demo cases built in:
 Requires Node.js 20.12 or newer. There are no dependencies to install.
 
 ```sh
-npm test        # 33 tests, see test/all.test.js
+npm test        # 36 tests, see test/all.test.js
 npm start       # then open http://localhost:3000
 ```
 
@@ -89,7 +89,7 @@ requests `GET /v1/attestation/report` with a fresh random nonce and the page sho
 | NEAR AI Cloud verifier | Implemented against the documented OpenAI-compatible API and unit-tested with mocked responses. Run by hand against the live service on 1 Nov 2026 (model `zai-org/GLM-5.1-FP8`): the demo cases returned sensible reasons. If the call fails the app falls back to rules only and says so in the UI. |
 | TEE attestation | **Partly.** The report is fetched with a fresh nonce and the page shows whether the nonce was echoed and an Intel TDX quote is present (seen working against the live endpoint on 1 Nov 2026). The app does **not** verify the Intel signature or the measurements itself; the page tells the user to check the quote at proof.t16z.com, and the Evidence box contains the full quote. |
 | Insurers, schools, inspection centers, offers, appointments | **Simulated.** All of it is fixed demo data in `scenarios.js`. The agent that "finds offers and books appointments" is not built; the verifier is. |
-| Provider confirmations (school received, shop shipped, policy issued, delivery code) | **Simulated by a provider portal page** (`/provider`) that you operate in a second window. Orders live in server memory. In a real version each confirmation would arrive from the provider's own system as a signed message, and the verifier would compare it with the rule before any escrow releases the money. |
+| Provider confirmations (school received, shop shipped, policy issued, delivery code) | **Simulated by a provider portal page** (`/provider`, with separate Provider and Courier tabs, no login) that you operate in a second window. Orders live in server memory. In a real version each confirmation would arrive from the provider's own system as a signed message, and the verifier would compare it with the rule before any escrow releases the money. |
 | NEAR Intents payment / on-chain escrow | **Not implemented.** Payment, escrow, confirmation and dispute pool are simulated in the page. |
 | Real money | None. |
 

@@ -5,21 +5,37 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Attack suite – Approval Moment</title>
 <style>
-:root{--bg:#f6f5f1;--card:#fff;--ink:#1c1b19;--mute:#6b6962;--line:#e3e0d8;--ok:#1f7a4d;--warn:#a86a00;--bad:#b3261e;--warnbg:#fff3dc;--acc:#2f4bd6}
-@media (prefers-color-scheme:dark){:root{--bg:#151513;--card:#201f1c;--ink:#f1efe9;--mute:#a09d94;--line:#34322d;--ok:#5fd08f;--warn:#f0b04a;--bad:#ff8a80;--warnbg:#33290f;--acc:#8ea2ff}}
+:root{--bg:#f6f5f1;--card:#fff;--ink:#1c1b19;--mute:#6b6962;--line:#e3e0d8;--ok:#1f7a4d;--warn:#a86a00;--bad:#b3261e;--okbg:#e6f4ec;--warnbg:#fff3dc;--badbg:#fde8e6;--acc:#2f4bd6}
+@media (prefers-color-scheme:dark){:root{--bg:#151513;--card:#201f1c;--ink:#f1efe9;--mute:#a09d94;--line:#34322d;--ok:#5fd08f;--warn:#f0b04a;--bad:#ff8a80;--okbg:#17301f;--warnbg:#33290f;--badbg:#3a1a18;--acc:#8ea2ff}}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
-main{max-width:900px;margin:0 auto;padding:20px 16px 48px}
+main{max-width:940px;margin:0 auto;padding:20px 16px 48px}
 h1{font-size:24px;margin:8px 0 4px}p.sub{color:var(--mute);margin:0 0 14px}
 .note{background:var(--warnbg);border-radius:10px;padding:10px 12px;font-size:14px;margin:10px 0}
 .bar{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
 button{font:inherit;padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
-button.go{background:var(--acc);border-color:var(--acc);color:#fff}button:disabled{opacity:.5}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:12px 0}
-.tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}.tile b{font-size:26px;display:block}.tile span{color:var(--mute);font-size:14px}
+button.go{background:var(--acc);border-color:var(--acc);color:#fff}button:disabled{opacity:.5;cursor:default}
+.prog{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin:6px 0 4px}
+.prog i{display:block;height:100%;width:0;background:var(--acc);transition:width .25s}
+.status{color:var(--mute);font-size:14px;min-height:1.4em}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:12px 0}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;transition:border-color .3s,background .3s}
+.tile b{font-size:26px;display:block;font-variant-numeric:tabular-nums}.tile span{color:var(--mute);font-size:14px}
+.tile.pop{border-color:var(--ok);background:var(--okbg)}
+.wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:14px}
-th,td{padding:8px 10px;border-top:1px solid var(--line);text-align:left}th{color:var(--mute);font-weight:600;border-top:0}
-.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.v{font-weight:700}
-.wrap{overflow-x:auto}a{color:var(--acc)}
+th,td{padding:8px 10px;border-top:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--mute);font-weight:600;border-top:0}
+tr.new{animation:in .5s ease both}
+tr.new.fbad{animation:inbad .9s ease both}
+@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes inbad{0%{opacity:0;transform:translateY(8px);background:var(--badbg)}40%{opacity:1;background:var(--badbg)}100%{background:transparent}}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.v{font-weight:700}.m{color:var(--mute)}
+.why{display:block;color:var(--mute);font-size:12px;margin-top:2px}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.tag{font-size:11px;border-radius:999px;padding:1px 8px;margin-left:6px;border:1px solid var(--bad);color:var(--bad);white-space:nowrap}
+.hit{font-size:13px;margin-top:4px}
+a{color:var(--acc)}
+@media (prefers-reduced-motion:reduce){tr.new,tr.new.fbad{animation:none}.spin{animation:none}.prog i{transition:none}}
 </style>
 </head>
 <body>
@@ -28,22 +44,68 @@ th,td{padding:8px 10px;border-top:1px solid var(--line);text-align:left}th{color
 <p class="sub">Runs every demo proposal (honest, sloppy and malicious) through the verifier and compares the result with the answer a correct verifier should give. <a href="/">Back to the app</a></p>
 <div class="note">This is a regression check, not an independent benchmark: the fixed rules were written with these cases in view. A hidden-text rule that catches a new attack is a good sign, but the real test is attacks nobody has thought of yet. The AI run adds NEAR AI Cloud as a second opinion that can only make a verdict stricter.</div>
 <div class="bar"><button class="go" id="r1">Run fixed rules (instant)</button><button id="r2">Run with NEAR AI (slow, needs a key)</button></div>
+<div class="prog"><i id="prog"></i></div><div class="status" id="status"></div>
+<div class="tiles" id="tiles"></div>
 <div id="out"></div>
 </main>
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const V=v=>v?'<span class="v '+esc(v)+'">'+esc(v)+'</span>':'<span class="m">–</span>';
+const L={ok:0,warn:1,bad:2};
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
+let token=0;
+const TILES=[["blocked","attacks blocked"],["passed","honest payments passed"],["flagged","sloppy cases flagged"],["falseb","honest cases wrongly stricter"],["missed","cases judged too loosely"],["aiup","cases where the AI made it stricter"]];
+function sums(rows){
+const done=rows.filter(r=>r.final);const att=rows.filter(r=>r.truth==="bad"),hon=rows.filter(r=>r.truth==="ok"),wn=rows.filter(r=>r.truth==="warn");
+return{blocked:att.filter(r=>r.final==="bad").length+"/"+att.length,passed:hon.filter(r=>r.final==="ok").length+"/"+hon.length,flagged:wn.filter(r=>r.final==="warn").length+"/"+wn.length,
+falseb:done.filter(r=>L[r.final]>L[r.truth]).length,missed:done.filter(r=>L[r.final]<L[r.truth]).length,aiup:done.filter(r=>r.ai&&L[r.final]>L[r.rules]).length}}
+function drawTiles(rows,ai,prev){
+const s=sums(rows);
+$("tiles").innerHTML=TILES.filter(t=>t[0]!=="aiup"||ai).map(t=>'<div class="tile" id="t-'+t[0]+'"><b>'+esc(s[t[0]])+'</b><span>'+esc(t[1])+'</span></div>').join("");
+if(prev)for(const k in s){if(prev[k]!==s[k]){const e=$("t-"+k);if(e){e.classList.add("pop");setTimeout(()=>e.classList.remove("pop"),400)}}}
+return s}
+function rowHtml(x,pending){
+const tag=x.truth==="bad"?'<span class="tag">attack</span>':"";
+const aiCell=pending?'<span class="spin" title="asking NEAR AI"></span>':V(x.ai);
+const fin=pending?'<span class="m">…</span>':V(x.final);
+const mark=pending?"":'<span class="'+(x.final===x.truth?"ok":"bad")+'">'+(x.final===x.truth?"✓":"✗")+'</span>';
+const why=x.why&&x.why.length?'<span class="why">'+x.why.map(esc).join(" · ")+'</span>':"";
+return '<td>'+esc(x.item)+' / '+esc(x.label)+tag+why+'</td><td>'+V(x.truth)+'</td><td>'+V(x.rules)+'</td><td>'+aiCell+'</td><td>'+fin+'</td><td>'+mark+'</td>'}
 async function run(ai){
-$("r1").disabled=$("r2").disabled=true;$("out").innerHTML='<p class="sub">Running'+(ai?' (each proposal is checked by the model, this can take a minute)':'')+'…</p>';
-try{const r=await fetch("/api/suite",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ai})});
-if(!r.ok)throw new Error("HTTP "+r.status);const d=await r.json(),s=d.summary;
-const t=(n,l)=>'<div class="tile"><b>'+esc(n)+'</b><span>'+esc(l)+'</span></div>';
-$("out").innerHTML='<div class="tiles">'+t(s.attacksBlocked+" / "+s.attacks,"attacks blocked")+t(s.honestPassed+" / "+s.honest,"honest payments passed")+t(s.warningsFlagged+" / "+s.warnings,"sloppy cases flagged")+t(s.falseBlocks,"honest cases wrongly stricter")+t(s.missed,"cases judged too loosely")+(s.mode==="live"?t(s.aiStricterThanRules,"cases where the AI made it stricter"):"")+'</div>'+
-'<p class="sub">Mode: '+esc(s.mode)+'</p><div class="wrap"><table><tr><th>Case</th><th>Should be</th><th>Fixed rules</th><th>NEAR AI</th><th>Final</th><th></th></tr>'+
-d.results.map(x=>'<tr><td>'+esc(x.item)+' / '+esc(x.label)+'</td><td>'+V(x.truth)+'</td><td>'+V(x.rules)+'</td><td>'+V(x.ai)+'</td><td>'+V(x.final)+'</td><td class="'+(x.match?"ok":"bad")+'">'+(x.match?"✓":"✗")+'</td></tr>').join("")+'</table></div>'}
-catch(e){$("out").innerHTML='<div class="note">Could not run the suite ('+esc(e.message)+').</div>'}
-$("r1").disabled=$("r2").disabled=false}
+const my=++token;
+$("r1").disabled=$("r2").disabled=true;$("tiles").innerHTML="";$("out").innerHTML="";$("prog").style.width="0";
+$("status").textContent="Loading the cases…";
+let data;
+try{const r=await fetch("/api/suite",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ai:false})});
+if(!r.ok)throw new Error("HTTP "+r.status);data=await r.json()}
+catch(e){$("status").textContent="Could not run the suite ("+e.message+").";$("r1").disabled=$("r2").disabled=false;return}
+const rows=data.results.map(x=>({...x,final:null,ai:null,rules:x.rules}));
+$("out").innerHTML='<div class="wrap"><table><thead><tr><th>Case</th><th>Should be</th><th>Fixed rules</th><th>NEAR AI</th><th>Final</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>';
+const tb=$("tb");let prev=drawTiles(rows,ai);
+const els=rows.map(x=>{const tr=document.createElement("tr");tb.appendChild(tr);return tr});
+let doneN=0;const total=rows.length;
+const finish=(i,pending)=>{const x=rows[i];els[i].innerHTML=rowHtml(x,pending);els[i].className="new"+(x.truth==="bad"&&!pending&&x.final==="bad"?" fbad":"")};
+$("status").textContent=ai?"Fixed rules are applied first, then NEAR AI is asked about each case…":"Applying the fixed rules to every case…";
+if(!ai){
+for(let i=0;i<total;i++){if(my!==token)return;rows[i].final=rows[i].rules;finish(i,false);doneN++;
+$("prog").style.width=(doneN/total*100)+"%";prev=drawTiles(rows,false,prev);await sleep(reduce?0:260)}
+$("status").textContent="Done: the fixed rules judged all "+total+" cases.";}
+else{
+const q=rows.map((_,i)=>i);let aiFails=0;
+for(let i=0;i<total;i++){rows[i].final=null;finish(i,true)}
+const worker=async()=>{while(q.length&&my===token){const i=q.shift();
+try{const r=await fetch("/api/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({item:rows[i].item,proposal:rows[i].proposal})});
+const d=await r.json();if(!r.ok)throw new Error(d.error||"HTTP "+r.status);
+rows[i].ai=d.ai?d.ai.verdict:null;rows[i].final=d.verdict;if(!d.ai)aiFails++}
+catch(e){rows[i].final=rows[i].rules;aiFails++}
+if(my!==token)return;finish(i,false);doneN++;$("prog").style.width=(doneN/total*100)+"%";prev=drawTiles(rows,true,prev);
+$("status").textContent="NEAR AI has answered "+doneN+" of "+total+" cases…"}};
+await Promise.all([worker(),worker(),worker()]);
+if(my!==token)return;
+$("status").textContent=aiFails===total?"NEAR AI did not answer (no key or a network problem), so only the fixed rules were used.":"Done. NEAR AI answered "+(total-aiFails)+" of "+total+" cases"+(aiFails?" ("+aiFails+" fell back to the fixed rules).":".")}
+if(my===token)$("r1").disabled=$("r2").disabled=false}
 $("r1").onclick=()=>run(false);$("r2").onclick=()=>run(true);run(false);
 </script>
 </body>

@@ -216,7 +216,7 @@ test("orders: inspection needs a confirmation, then a pass with a long enough ce
     assert.equal((await act(base, order.id, { action: "complete", result: "Passed", validUntil: "2027-11-01" })).status, 400);
     assert.equal((await act(base, order.id, { action: "confirm", code: "INS-1234" })).status, 200);
     await act(base, order.id, { action: "complete", result: "Passed", validUntil: "2027-11-01" });
-    assert.equal((await j(await fetch(`${base}/api/orders/${order.id}`))).status, "completed");
+    assert.equal((await j(await fetch(`${base}/api/orders/${order.id}`))).status, "holding");
     const bad = (await newOrder(base, "car", "sat")).order;
     await act(base, bad.id, { action: "confirm", code: "INS-1234" });
     await act(base, bad.id, { action: "complete", result: "Passed", validUntil: "2026-12-01" });
@@ -230,16 +230,16 @@ test("orders: shop flow needs the buyer's delivery code and checks the size", as
     assert.match(order.buyerCode, /^\d{6}$/);
     assert.equal((await act(base, order.id, { action: "ship", tracking: "bad" })).status, 400);
     assert.equal((await act(base, order.id, { action: "ship", tracking: "TR12345678" })).status, 200);
-    const wrong = await act(base, order.id, { action: "deliver", deliveryCode: "000000", size: "42" });
+    const wrong = await act(base, order.id, { action: "deliver", role: "courier", deliveryCode: "000000", size: "42" });
     assert.equal(wrong.status, 400);
     assert.match((await j(wrong)).error, /delivery code/i);
-    await act(base, order.id, { action: "deliver", deliveryCode: order.buyerCode, size: "42" });
+    await act(base, order.id, { action: "deliver", role: "courier", deliveryCode: order.buyerCode, size: "42" });
     const done = await j(await fetch(`${base}/api/orders/${order.id}`));
-    assert.equal(done.status, "completed");
+    assert.equal(done.status, "holding");
     assert.equal(done.buyerCode, null);
     const o2 = (await newOrder(base, "shoes", "normal")).order;
     await act(base, o2.id, { action: "ship", tracking: "TR12345678" });
-    await act(base, o2.id, { action: "deliver", deliveryCode: o2.buyerCode, size: "43" });
+    await act(base, o2.id, { action: "deliver", role: "courier", deliveryCode: o2.buyerCode, size: "43" });
     assert.equal((await j(await fetch(`${base}/api/orders/${o2.id}`))).status, "dispute");
   });
 });
@@ -350,5 +350,66 @@ test("server: /api/suite and /suite work", async () => {
     const r = await j(await post(base, "/api/suite", { ai: false }));
     assert.equal(r.results.length, r.summary.total);
     assert.match(await (await fetch(`${base}/suite`)).text(), /Attack suite/);
+  });
+});
+
+test("escrow: the money is released only after the buyer confirms, or after 2 quiet days", async () => {
+  await withApp({}, async (base) => {
+    const mk = async () => {
+      const { order } = await newOrder(base, "shoes", "normal");
+      await act(base, order.id, { action: "ship", tracking: "TR12345678" });
+      await act(base, order.id, { action: "deliver", role: "courier", deliveryCode: order.buyerCode, size: "42" });
+      return order.id;
+    };
+    const buyer = (id, action) => post(base, `/api/orders/${id}/buyer`, { action });
+    const get = async (id) => j(await fetch(`${base}/api/orders/${id}`));
+    const a = await mk();
+    let v = await get(a);
+    assert.equal(v.status, "holding");
+    assert.equal(v.canConfirm, true);
+    assert.equal(v.steps.at(-1).state, "waiting");
+    assert.equal((await buyer(a, "nonsense")).status, 400);
+    assert.equal((await buyer(a, "accept")).status, 200);
+    v = await get(a);
+    assert.equal(v.status, "completed");
+    assert.equal((await buyer(a, "accept")).status, 400);
+    const b = await mk();
+    await buyer(b, "report");
+    assert.equal((await get(b)).status, "dispute");
+    const c = await mk();
+    await buyer(c, "timeout");
+    v = await get(c);
+    assert.equal(v.status, "completed");
+    assert.equal(v.events.at(-1).action, "autorelease");
+    assert.equal((await buyer("0".repeat(16), "accept")).status, 404);
+  });
+});
+
+test("escrow: a direct payment has no buyer step, and a failed check never reaches the buyer step", async () => {
+  await withApp({}, async (base) => {
+    const { order } = await newOrder(base, "school", "normal");
+    assert.ok(!order.steps.some((x) => x.key === "buyer"));
+    await act(base, order.id, { action: "confirm", amount: 350 });
+    assert.equal((await post(base, `/api/orders/${order.id}/buyer`, { action: "accept" })).status, 400);
+    const s = (await newOrder(base, "shoes", "normal")).order;
+    await act(base, s.id, { action: "ship", tracking: "TR12345678" });
+    await act(base, s.id, { action: "deliver", role: "courier", deliveryCode: s.buyerCode, size: "43" });
+    const v = await j(await fetch(`${base}/api/orders/${s.id}`));
+    assert.equal(v.status, "dispute");
+    assert.equal(v.canConfirm, false);
+  });
+});
+
+test("roles: the shop cannot mark a parcel as delivered, only the courier can", async () => {
+  await withApp({}, async (base) => {
+    const { order } = await newOrder(base, "shoes", "normal");
+    await act(base, order.id, { action: "ship", tracking: "TR12345678" });
+    const asShop = await act(base, order.id, { action: "deliver", deliveryCode: order.buyerCode, size: "42" });
+    assert.equal(asShop.status, 400);
+    assert.match((await j(asShop)).error, /courier/i);
+    const asCourier = await act(base, order.id, { action: "deliver", role: "courier", deliveryCode: order.buyerCode, size: "42" });
+    assert.equal(asCourier.status, 200);
+    const asCourierShip = await newOrder(base, "shoes", "normal");
+    assert.equal((await act(base, asCourierShip.order.id, { action: "ship", role: "courier", tracking: "TR12345678" })).status, 400);
   });
 });

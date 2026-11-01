@@ -95,6 +95,7 @@ const FLOWS = {
         : { ok: false, detail: `Certificate is missing, failed or too short (${r.result}, until ${r.validUntil})` };
     },
     checkLabel: "Certificate check",
+    buyerLabel: "You confirm you have the certificate",
   },
   shop: {
     provider: [
@@ -107,7 +108,7 @@ const FLOWS = {
         },
       },
       {
-        action: "deliver", button: "Mark as delivered", label: () => "Delivered",
+        action: "deliver", who: "courier", button: "Mark as delivered", label: () => "Delivered",
         fields: (o) => [
           { name: "deliveryCode", label: "Delivery code (the buyer tells the courier at the door)", type: "text", default: "" },
           { name: "size", label: "Size of the delivered item", type: "select", options: ["42", "43"], default: String(o.expect.size) },
@@ -127,6 +128,7 @@ const FLOWS = {
         : { ok: false, detail: `The delivered item (size ${size}) does not match your rule (size ${o.expect.size})` };
     },
     checkLabel: "Item check",
+    buyerLabel: "You confirm the parcel arrived as expected",
   },
 };
 
@@ -151,25 +153,46 @@ export function createOrder({ itemId, proposalId, digest, now = new Date() }) {
   };
   o.steps.push(...flow.provider.map((p) => ({ key: p.action, label: p.label(o), state: "waiting", detail: "Waiting" })));
   o.steps.push({ key: "check", label: flow.checkLabel, state: "waiting", detail: "Waiting" });
+  if (item.payMode === "escrow") o.steps.push({ key: "buyer", label: flow.buyerLabel, state: "waiting", detail: "Waiting" });
   return o;
 }
 
 const nextProviderStep = (o) => (o.status === "open" ? FLOWS[o.flow].provider[o.cursor - 1] ?? null : null);
 
-export function providerAction(o, action, body, now = new Date()) {
+export function providerAction(o, action, body, now = new Date(), role = "provider") {
   const step = nextProviderStep(o);
   if (!step) throw fail("There is nothing for the provider to do on this order.");
   if (step.action !== action) throw fail(`The next step is "${step.button}".`);
+  if ((step.who || "provider") !== role) throw fail(`This step is done by the ${step.who || "provider"}, not the ${role}.`);
   const { data, detail } = step.apply(o, body || {});
   o.events.push({ time: now.toISOString(), actor: "provider", action, data });
   Object.assign(o.steps[o.cursor], { state: "done", detail });
   o.cursor += 1;
-  if (o.cursor === o.steps.length - 1) {
+  if (o.cursor === FLOWS[o.flow].provider.length + 1) {
     const r = FLOWS[o.flow].check(o, now);
     Object.assign(o.steps[o.cursor], { state: r.ok ? "done" : "bad", detail: r.detail });
-    o.status = r.ok ? "completed" : "dispute";
+    // With escrow the money stays put until the buyer confirms (or 2 days pass without a complaint).
+    o.status = !r.ok ? "dispute" : o.payMode === "escrow" ? "holding" : "completed";
     o.events.push({ time: now.toISOString(), actor: "verifier", action: "check", data: { ok: r.ok, detail: r.detail } });
   }
+  return o;
+}
+
+// The buyer's last word on an escrow order: confirm, report a problem, or say nothing for 2 days.
+export function buyerAction(o, action, now = new Date()) {
+  if (o.status !== "holding") throw fail("There is nothing to confirm on this order right now.");
+  const step = o.steps[o.steps.length - 1];
+  if (action === "accept") {
+    Object.assign(step, { state: "done", detail: "You confirmed. The escrow released the money." });
+    o.status = "completed";
+  } else if (action === "report") {
+    Object.assign(step, { state: "bad", detail: "You reported a problem. The money stays in escrow." });
+    o.status = "dispute";
+  } else if (action === "timeout") {
+    Object.assign(step, { state: "done", detail: "No complaint within 2 days. The escrow released the money." });
+    o.status = "completed";
+  } else throw fail("Unknown action.");
+  o.events.push({ time: now.toISOString(), actor: action === "timeout" ? "system" : "buyer", action: action === "timeout" ? "autorelease" : action, data: { result: o.status } });
   return o;
 }
 
@@ -189,8 +212,9 @@ export function userView(o) {
     id: o.id, itemId: o.itemId, proposalId: o.proposalId, payMode: o.payMode, provider: o.provider,
     status: o.status, price: o.price, digest: o.digest, steps: o.steps, events: o.events,
     buyerCode: o.buyerCode && o.status === "open" ? o.buyerCode : null,
-    waitingFor: step ? step.button : null,
+    waitingFor: o.status === "holding" ? "your confirmation" : step ? step.button : null,
     canExpire: o.status === "open" && o.cursor === 1,
+    canConfirm: o.status === "holding",
   };
 }
 
@@ -199,6 +223,6 @@ export function providerView(o, now = new Date()) {
   return {
     id: o.id, provider: o.provider, title: o.title, price: o.price, payee: o.to, ref: o.digest.slice(0, 12),
     payMode: o.payMode, createdAt: o.createdAt, status: o.status, steps: o.steps,
-    action: step ? { name: step.action, button: step.button, fields: step.fields(o, now) } : null,
+    action: step ? { name: step.action, who: step.who || "provider", button: step.button, fields: step.fields(o, now) } : null,
   };
 }

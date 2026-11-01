@@ -22,6 +22,7 @@ input,select{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid va
 button{font:inherit;padding:10px 16px;border-radius:10px;border:1px solid var(--acc);background:var(--acc);color:#fff;cursor:pointer;justify-self:start}
 .err{color:var(--bad);font-size:14px;min-height:1.2em}
 .empty{color:var(--mute);padding:12px 0}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.tabs button{background:var(--card);color:var(--ink);border:1px solid var(--line)}.tabs button[aria-pressed="true"]{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc) inset}
 </style>
 </head>
 <body>
@@ -29,13 +30,14 @@ button{font:inherit;padding:10px 16px;border-radius:10px;border:1px solid var(--
 <h1>Provider portal</h1>
 <p class="sub">Play the school, the insurer, the inspection center or the shop. Payments approved on the main page appear here. Whatever you confirm shows up on the user's screen immediately.</p>
 <div class="banner">Demo only. In a real system these confirmations would arrive as signed messages from the provider's own system, not from a web form.</div>
+<div class="tabs" id="roles"><button data-r="provider" aria-pressed="true">Provider (school, insurer, shop, inspection center)</button><button data-r="courier" aria-pressed="false">Courier</button></div>
 <div id="orders"><div class="empty">Loading…</div></div>
 </main>
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const draft={};  // typed-but-unsent values survive re-rendering
-let busy=false;
+let busy=false,role="provider",last=null;
 function field(o,f){
 const v=(draft[o.id]&&draft[o.id][f.name]!==undefined)?draft[o.id][f.name]:f.default;
 const id="f-"+o.id+"-"+f.name;
@@ -43,20 +45,22 @@ if(f.type==="select")return '<label>'+esc(f.label)+'<select name="'+esc(f.name)+
 return '<label>'+esc(f.label)+'<input name="'+esc(f.name)+'" type="'+esc(f.type)+'" value="'+esc(v??"")+'"'+(f.type==="number"?' step="any"':'')+' autocomplete="off"></label>'}
 function card(o){
 const steps=o.steps.map(s=>'<div class="step"><i class="'+(s.state==="done"?"ok":s.state==="bad"?"bad":"")+'">'+(s.state==="done"?"✓":s.state==="bad"?"✗":"•")+'</i><span><b>'+esc(s.label)+'</b><br><span class="m">'+esc(s.detail)+'</span></span></div>').join("");
-const form=o.action?'<form data-id="'+esc(o.id)+'" data-action="'+esc(o.action.name)+'">'+o.action.fields.map(f=>field(o,f)).join("")+'<button>'+esc(o.action.button)+'</button><div class="err" role="alert"></div></form>':
-'<div class="m" style="margin-top:8px">'+(o.status==="open"?"Nothing to do right now.":"This order is closed ("+esc(o.status)+").")+'</div>';
+const mine=o.action&&o.action.who===role;
+const form=mine?'<form data-id="'+esc(o.id)+'" data-action="'+esc(o.action.name)+'">'+o.action.fields.map(f=>field(o,f)).join("")+'<button>'+esc(o.action.button)+'</button><div class="err" role="alert"></div></form>':
+'<div class="m" style="margin-top:8px">'+(o.action?"Waiting for the "+esc(o.action.who)+" ("+esc(o.action.button)+"). Switch tab to act as them.":o.status==="holding"?"Delivered. Waiting for the buyer to confirm that everything arrived as expected.":o.status==="open"?"Nothing to do right now.":"This order is closed ("+esc(o.status)+").")+'</div>';
 return '<div class="card"><div class="top"><b>'+esc(o.provider)+'</b><span class="m">'+esc(o.title)+' · $'+esc(o.price)+' · '+(o.payMode==="direct"?"paid directly":"held in escrow")+'</span></div>'+
 '<div class="m">Payee account <code>'+esc(o.payee)+'</code> · reference <code>'+esc(o.ref)+'</code></div><div style="margin-top:8px">'+steps+'</div>'+form+'</div>'}
 async function load(){
 if(busy)return;
 // do not re-render while someone is typing in a form
 if(document.activeElement&&document.activeElement.closest&&document.activeElement.closest("form"))return;
-try{const r=await fetch("/api/provider/orders");const d=await r.json();
+try{const r=await fetch("/api/provider/orders");const d=await r.json();last=d;
 $("orders").innerHTML=d.orders.length?d.orders.map(card).join(""):'<div class="empty">No payments yet. Approve one on the main page (http://localhost:3000) and it will appear here.</div>'}
 catch(e){$("orders").innerHTML='<div class="empty">Could not reach the server.</div>'}}
+$("roles").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;role=b.dataset.r;document.querySelectorAll("#roles button").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));if(document.activeElement)document.activeElement.blur();load()});
 $("orders").addEventListener("input",e=>{const f=e.target.closest("form");if(!f)return;(draft[f.dataset.id]||(draft[f.dataset.id]={}))[e.target.name]=e.target.value});
 $("orders").addEventListener("submit",async e=>{
-e.preventDefault();const f=e.target,body={action:f.dataset.action};
+e.preventDefault();const f=e.target,body={action:f.dataset.action,role};
 new FormData(f).forEach((v,k)=>{body[k]=v});
 busy=true;
 try{const r=await fetch("/api/provider/orders/"+f.dataset.id+"/action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
