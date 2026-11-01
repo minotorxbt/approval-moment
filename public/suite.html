@@ -35,13 +35,15 @@ tr.new.fbad{animation:inbad .9s ease both}
 .tag{font-size:11px;border-radius:999px;padding:1px 8px;margin-left:6px;border:1px solid var(--bad);color:var(--bad);white-space:nowrap}
 .hit{font-size:13px;margin-top:4px}
 a{color:var(--acc)}
+body.embed h1,body.embed p.sub,body.embed .back{display:none}body.embed main{padding-top:10px}
+tr.hl td{background:var(--warnbg)}
 @media (prefers-reduced-motion:reduce){tr.new,tr.new.fbad{animation:none}.spin{animation:none}.prog i{transition:none}}
 </style>
 </head>
 <body>
 <main>
 <h1>Attack suite</h1>
-<p class="sub">Runs every demo proposal (honest, sloppy and malicious) through the verifier and compares the result with the answer a correct verifier should give. <a href="/">Back to the app</a></p>
+<p class="sub">Runs every demo proposal (honest, sloppy and malicious) through the verifier and compares the result with the answer a correct verifier should give. <a class="back" href="/">Back to the app</a></p>
 <div class="note">This is a regression check, not an independent benchmark: the fixed rules were written with these cases in view. A hidden-text rule that catches a new attack is a good sign, but the real test is attacks nobody has thought of yet. The AI run adds NEAR AI Cloud as a second opinion that can only make a verdict stricter.</div>
 <div class="bar"><button class="go" id="r1">Run fixed rules (instant)</button><button id="r2">Run with NEAR AI (slow, needs a key)</button></div>
 <div class="prog"><i id="prog"></i></div><div class="status" id="status"></div>
@@ -56,6 +58,8 @@ const L={ok:0,warn:1,bad:2};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
 let token=0;
+const EMBED=new URLSearchParams(location.search).has("embed");if(EMBED)document.body.classList.add("embed");
+const WANT=decodeURIComponent(location.hash.slice(1));
 const TILES=[["blocked","attacks blocked"],["passed","honest payments passed"],["flagged","sloppy cases flagged"],["falseb","honest cases wrongly stricter"],["missed","cases judged too loosely"],["aiup","cases where the AI made it stricter"]];
 function sums(rows){
 const done=rows.filter(r=>r.final);const att=rows.filter(r=>r.truth==="bad"),hon=rows.filter(r=>r.truth==="ok"),wn=rows.filter(r=>r.truth==="warn");
@@ -86,7 +90,8 @@ $("out").innerHTML='<div class="wrap"><table><thead><tr><th>Case</th><th>Should 
 const tb=$("tb");let prev=drawTiles(rows,ai);
 const els=rows.map(x=>{const tr=document.createElement("tr");tb.appendChild(tr);return tr});
 let doneN=0;const total=rows.length;
-const finish=(i,pending)=>{const x=rows[i];els[i].innerHTML=rowHtml(x,pending);els[i].className="new"+(x.truth==="bad"&&!pending&&x.final==="bad"?" fbad":"")};
+const finish=(i,pending)=>{const x=rows[i];els[i].innerHTML=rowHtml(x,pending);if(WANT&&WANT===x.item+"/"+x.proposal&&!pending){els[i].classList.add("hl");els[i].scrollIntoView({block:"center",behavior:"smooth"})}
+els[i].className=(WANT&&WANT===x.item+"/"+x.proposal?"hl ":"")+"new"+(x.truth==="bad"&&!pending&&x.final==="bad"?" fbad":"")};
 $("status").textContent=ai?"Fixed rules are applied first, then NEAR AI is asked about each case…":"Applying the fixed rules to every case…";
 if(!ai){
 for(let i=0;i<total;i++){if(my!==token)return;rows[i].final=rows[i].rules;finish(i,false);doneN++;

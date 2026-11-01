@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { check, scanHidden } from "../rules.js";
 import { verify, parseVerdict, fetchAttestation } from "../verifier.js";
-import { ITEMS, ITEM_ORDER } from "../scenarios.js";
+import { ITEMS, ITEM_ORDER, effectivePlan } from "../scenarios.js";
 import { createApp, runSuite } from "../server.js";
 import { chooseOffer, parseChoice } from "../agent.js";
 import { checkAgentKey, judgeKey, judgeKeyList, validAccount, validKey } from "../near.js";
@@ -483,4 +483,35 @@ test("near: without a key the whole key list is read and described", async () =>
   assert.equal(r.rows[1][1], "ok");
   assert.match(r.summary, /1 full access, 1 limited/);
   assert.equal(judgeKeyList([keys[1]]).level, "ok");
+});
+
+// ---------- discount code found in hidden page text ----------
+test("promo: the discounted plan is computed from fixed data and adds a visible discount row", () => {
+  const prop = ITEMS.health.proposals.find((p) => p.id === "polite");
+  assert.equal(effectivePlan(prop, false).price, 840);
+  const d = effectivePlan(prop, true);
+  assert.equal(d.price, 756);
+  assert.deepEqual(d.promo, { code: "HEALTH10", percent: 10, saved: 84 });
+  const c = check(ITEMS.health.rule, d, prop.page);
+  assert.ok(c.rows.some((r) => r[0] === "Discount" && r[1] === "ok"));
+  assert.equal(c.verdict, "warn"); // the hidden text itself still needs the user's attention
+  const other = ITEMS.health.proposals.find((p) => p.id === "best");
+  assert.equal(effectivePlan(other, true), other.plan);
+});
+
+test("promo: server applies it only when asked and only where the offer has a code; orders carry the lower price", async () => {
+  await withApp({ verifyImpl: (i) => verify(i, { apiKey: "" }) }, async (base) => {
+    const plain = await j(await post(base, "/api/check", { item: "health", proposal: "polite" }));
+    assert.equal(plain.rules.rows.find((r) => r[0] === "Price")[2].startsWith("$840"), true);
+    const disc = await j(await post(base, "/api/check", { item: "health", proposal: "polite", promo: true }));
+    assert.ok(disc.rules.rows.find((r) => r[0] === "Price")[2].startsWith("$756"));
+    assert.equal((await post(base, "/api/check", { item: "health", proposal: "best", promo: true })).status, 400);
+    assert.equal((await post(base, "/api/orders", { item: "health", proposal: "best", digest: DIGEST, promo: true })).status, 400);
+    const o = await j(await post(base, "/api/orders", { item: "health", proposal: "polite", digest: DIGEST, promo: true }));
+    assert.equal(o.price, 756);
+    const list = (await j(await fetch(`${base}/api/provider/orders`))).orders;
+    assert.equal(list[0].price, 756);
+    const s = await j(await fetch(`${base}/api/state`));
+    assert.deepEqual(s.items.find((i) => i.id === "health").proposals.find((p) => p.id === "polite").promo, { code: "HEALTH10", percent: 10 });
+  });
 });

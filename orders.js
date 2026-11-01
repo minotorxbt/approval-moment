@@ -3,7 +3,7 @@
 // provider reported with the user's rule. All of it is simulated; in a real version the reports
 // would arrive from the provider's own system as signed confirmations or receipts.
 import { randomBytes } from "node:crypto";
-import { ITEMS } from "./scenarios.js";
+import { ITEMS, effectivePlan } from "./scenarios.js";
 
 const DAY = 864e5;
 const money = (n) => `$${n}`;
@@ -132,7 +132,7 @@ const FLOWS = {
   },
 };
 
-export function createOrder({ itemId, proposalId, digest, now = new Date() }) {
+export function createOrder({ itemId, proposalId, digest, promo = false, now = new Date() }) {
   const item = ITEMS[itemId];
   const proposal = item.proposals.find((p) => p.id === proposalId);
   const flow = FLOWS[item.flow];
@@ -141,7 +141,7 @@ export function createOrder({ itemId, proposalId, digest, now = new Date() }) {
     itemId, proposalId, digest,
     createdAt: now.toISOString(),
     flow: item.flow, payMode: item.payMode, provider: item.provider, title: item.title,
-    price: proposal.plan.price, to: proposal.plan.to,
+    price: effectivePlan(proposal, promo).price, to: proposal.plan.to, promo: promo && proposal.promo ? proposal.promo.code : null,
     expect: { ...(item.expect || {}), size: item.rule.attrs?.size },
     buyerCode: item.flow === "shop" ? digits(6) : null,
     status: "open", cursor: 1, events: [],
@@ -209,7 +209,7 @@ export function expireOrder(o, now = new Date()) {
 export function userView(o) {
   const step = nextProviderStep(o);
   return {
-    id: o.id, itemId: o.itemId, proposalId: o.proposalId, payMode: o.payMode, provider: o.provider,
+    id: o.id, itemId: o.itemId, proposalId: o.proposalId, payMode: o.payMode, provider: o.provider, chain: o.chain || null,
     status: o.status, price: o.price, digest: o.digest, steps: o.steps, events: o.events,
     buyerCode: o.buyerCode && o.status === "open" ? o.buyerCode : null,
     waitingFor: o.status === "holding" ? "your confirmation" : step ? step.button : null,

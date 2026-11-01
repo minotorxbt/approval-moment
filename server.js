@@ -2,11 +2,12 @@ import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { ITEMS, ITEM_ORDER } from "./scenarios.js";
+import { ITEMS, ITEM_ORDER, effectivePlan } from "./scenarios.js";
 import { verify, fetchAttestation } from "./verifier.js";
 import { check } from "./rules.js";
 import { chooseOffer } from "./agent.js";
 import { checkAgentKey } from "./near.js";
+import { createChain, payeeAccount } from "./chain.js";
 import { createOrder, providerAction, expireOrder, buyerAction, userView, providerView } from "./orders.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -61,7 +62,7 @@ function stateFor(now) {
         id: it.id, title: it.title, category: it.category, dueInDays: it.dueInDays, oneOff: Boolean(it.oneOff),
         instruction: it.instruction, rule: it.rule, agentSays: it.agentSays,
         payMode: it.payMode, provider: it.provider,
-        proposals: it.proposals.map(({ id: pid, label, plan, page }) => ({ id: pid, label, plan, page })),
+        proposals: it.proposals.map(({ id: pid, label, plan, page, promo }) => ({ id: pid, label, plan, page, promo: promo || null })),
       };
     }),
   };
@@ -106,8 +107,27 @@ export async function runSuite({ ai, verifyImpl }) {
   return { summary: sum, results };
 }
 
-export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, agentImpl = chooseOffer, nearImpl = checkAgentKey, now = () => new Date() } = {}) {
+export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, agentImpl = chooseOffer, nearImpl = checkAgentKey, chainImpl = null, now = () => new Date() } = {}) {
+  // Under `node --test` the real chain is never used, even if the developer's .env has testnet keys:
+  // tests must not move any money. Tests that need a chain pass a fake one with chainImpl.
+  const chain = chainImpl || (process.env.NODE_TEST_CONTEXT ? createChain({ env: {} }) : createChain());
   const orders = new Map();
+  // Records a real testnet transfer on the order (only when testnet mode is on). Never throws.
+  const record = (o, kind, tx, step) => {
+    const name = (a) => (a === chain.accounts?.agent ? "Your agent wallet" : a === chain.accounts?.escrow ? "Escrow account" : a === o.chainPayee ? `${o.provider} (demo address)` : "Other account");
+    const rec = { kind, ...tx, fromLabel: name(tx.from), toLabel: name(tx.to) };
+    (o.chain ||= { network: "testnet", txs: [] }).txs.push(rec);
+    o.events.push({ time: now().toISOString(), actor: "chain", action: kind, data: rec });
+    if (step) step.tx = rec;
+  };
+  const settle = async (o, kind, from, to, step) => {
+    if (!chain.enabled) return;
+    try { record(o, kind, await chain.transfer(from, to, o.price), step); }
+    catch (e) {
+      o.events.push({ time: now().toISOString(), actor: "chain", action: "error", data: { kind, message: String(e.message || e).slice(0, 160) } });
+      if (step) step.detail += ` On-chain transfer failed: ${String(e.message || e).slice(0, 100)}`;
+    }
+  };
   const watchers = new Set();
   const announce = (id) => { for (const w of watchers) w.write(`event: order\ndata: ${JSON.stringify({ id })}\n\n`); };
   const keepAlive = setInterval(() => { for (const w of watchers) w.write(": ping\n\n"); }, 25000);
@@ -125,6 +145,7 @@ export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, 
       if (get && p === "/provider") return send(res, 200, await readFile(path.join(here, "public", "provider.html"), "utf8"), "text/html; charset=utf-8");
       if (get && p === "/api/status") return send(res, 200, { mode: process.env.NEAR_AI_API_KEY ? "live" : "demo" });
       if (get && p === "/api/state") return send(res, 200, stateFor(now()));
+      if (get && p === "/api/chain/status") return send(res, 200, await chain.status());
       if (get && p === "/api/attestation") return send(res, 200, await attestImpl());
 
       if (get && p === "/api/stream") {
@@ -141,7 +162,8 @@ export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, 
         const item = typeof body.item === "string" && Object.hasOwn(ITEMS, body.item) ? ITEMS[body.item] : null;
         const proposal = item && typeof body.proposal === "string" ? item.proposals.find((x) => x.id === body.proposal) : null;
         if (!item || !proposal) return send(res, 400, { error: "unknown item or proposal" });
-        return send(res, 200, await verifyImpl({ ins: item.rule, plan: proposal.plan, page: proposal.page }));
+        if (body.promo === true && !proposal.promo) return send(res, 400, { error: "this offer has no discount code" });
+        return send(res, 200, await verifyImpl({ ins: item.rule, plan: effectivePlan(proposal, body.promo === true), page: proposal.page }));
       }
 
       if (post && p === "/api/agent") {
@@ -178,8 +200,16 @@ export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, 
         const proposal = item && typeof body.proposal === "string" ? item.proposals.find((x) => x.id === body.proposal) : null;
         if (!item || !proposal) return send(res, 400, { error: "unknown item or proposal" });
         if (typeof body.digest !== "string" || !/^[0-9a-f]{64}$/.test(body.digest)) return send(res, 400, { error: "digest must be a SHA-256 hex string" });
-        if (check(item.rule, proposal.plan, proposal.page).verdict === "bad") return send(res, 409, { error: "blocked by the fixed rules" });
-        const order = createOrder({ itemId: item.id, proposalId: proposal.id, digest: body.digest, now: now() });
+        if (body.promo === true && !proposal.promo) return send(res, 400, { error: "this offer has no discount code" });
+        if (check(item.rule, effectivePlan(proposal, body.promo === true), proposal.page).verdict === "bad") return send(res, 409, { error: "blocked by the fixed rules" });
+        const order = createOrder({ itemId: item.id, proposalId: proposal.id, digest: body.digest, promo: body.promo === true, now: now() });
+        if (chain.enabled) {
+          // Money moves first. If the transfer fails, no order exists and nothing was paid.
+          order.chainPayee = payeeAccount(item.provider); // where the money finally goes
+          const dest = item.payMode === "escrow" ? chain.accounts.escrow : order.chainPayee;
+          try { record(order, "payment", await chain.transfer("agent", dest, order.price), order.steps[0]); }
+          catch (e) { return send(res, 502, { error: `On-chain payment failed, nothing was paid: ${String(e.message || e).slice(0, 140)}` }); }
+        }
         orders.set(order.id, order);
         if (orders.size > MAX_ORDERS) orders.delete(orders.keys().next().value);
         announce(order.id);
@@ -196,6 +226,7 @@ export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, 
         const o = orders.get(m[1]);
         if (!o) return send(res, 404, { error: "order not found" });
         try { expireOrder(o, now()); } catch (e) { return send(res, e.code || 500, { error: e.message }); }
+        if (o.status === "refund") await settle(o, "refund", "escrow", chain.accounts?.agent, o.steps[1]);
         announce(o.id);
         return send(res, 200, userView(o));
       }
@@ -207,6 +238,7 @@ export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, 
         const body = await jsonBody(req, res);
         if (!body) return;
         try { buyerAction(o, String(body.action), now()); } catch (e) { return send(res, e.code || 500, { error: e.message }); }
+        if (o.status === "completed" && o.payMode === "escrow") await settle(o, "release", "escrow", o.chainPayee, o.steps.at(-1));
         announce(o.id);
         return send(res, 200, userView(o));
       }

@@ -45,6 +45,8 @@ export function check(ins, plan, page = {}) {
   const limit = `limit $${ins.max}${ins.expected != null ? `, expected $${ins.expected}` : ""}`;
   rows.push(["Price", price, `$${plan.price} (${limit})`]);
 
+  if (plan.promo) rows.push(["Discount", "ok", `${plan.promo.code}: ${plan.promo.percent}% off, $${plan.promo.saved} saved (you approved using it)`]);
+
   if (Array.isArray(ins.slots)) {
     const free = ins.slots.includes(plan.slot);
     rows.push(["Appointment", free ? "ok" : "warn", free ? `${plan.slot} (you are free)` : `${plan.slot ?? "none"} (not in your free times)`]);

@@ -5,9 +5,13 @@
   "type": "module",
   "private": true,
   "license": "MIT",
-  "engines": { "node": ">=20.12" },
+  "engines": {
+    "node": ">=20.12"
+  },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "testnet:setup": "node scripts/testnet.js setup",
+    "testnet:status": "node scripts/testnet.js status"
   }
 }

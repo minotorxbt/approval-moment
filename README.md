@@ -1,5 +1,7 @@
 # Approval Moment
 
+**An independent payment verifier for AI agents.**
+
 **Track:** AI Security & Defense (also relevant to Agent Economy and Privacy & Private AI)
 
 ## The problem
@@ -48,12 +50,16 @@ Demo cases built in:
 
 11. **Agent key check on NEAR** (read-only): enter a NEAR account (and optionally the agent's public key) and the app reads the real access keys from a public NEAR RPC node. A full-access key is flagged, because it can move everything in the account. A function-call key (it can only call methods on one contract, cannot transfer NEAR or attach a deposit, and has a fee allowance) is shown as the safe setup for an agent. Nothing is signed, no secret is requested, and the result is added to the Evidence box.
 
+12. **Discount code found in hidden text**: when a page hides a discount code, the agent does not use it on its own (text a human cannot see is not something an agent should obey). It tells you what you would save and asks. If you agree, the plan is recomputed on the server from fixed data, the verifier checks the new price again, and the Evidence box records that the code was used.
+
+13. **Optional NEAR testnet mode**: with `npm run testnet:setup` the app creates two throw-away testnet keys (stored only in your local `.env`, never printed) and the payments become real transfers of **test NEAR**: the agent wallet pays the provider directly, or pays the escrow account for purchases and bookings; the escrow releases the money after the buyer confirms and refunds it after a timeout. Every transfer shows up in the Evidence box and as a link to the NEAR testnet explorer. Dollars are converted at a fixed demo rate ($1 = 0.001 test NEAR). It is testnet-only by construction (there is no mainnet endpoint in the code), the agent can only spend what you put in its wallet, and if a transfer fails no order is created. The escrow is an ordinary testnet account controlled by the server, **not an escrow contract**. Signing is dependency-free (`node:crypto` and hand-written borsh) and the tests check the bytes against the official near-api-js library.
+
 ## Try it (no account, no key, no network needed)
 
 Requires Node.js 20.12 or newer. There are no dependencies to install.
 
 ```sh
-npm test        # 41 tests, see test/all.test.js
+npm test        # 55 tests, see test/all.test.js
 npm start       # then open http://localhost:3000
 ```
 
@@ -92,7 +98,7 @@ requests `GET /v1/attestation/report` with a fresh random nonce and the page sho
 | TEE attestation | **Partly.** The report is fetched with a fresh nonce and the page shows whether the nonce was echoed and an Intel TDX quote is present (seen working against the live endpoint on 1 Nov 2026). The app does **not** verify the Intel signature or the measurements itself; the page tells the user to check the quote at proof.t16z.com, and the Evidence box contains the full quote. |
 | Insurers, schools, inspection centers, offers, appointments | **Simulated.** All of it is fixed demo data in `scenarios.js`. The agent that "finds offers and books appointments" is not built; the verifier is. |
 | Provider confirmations (school received, shop shipped, policy issued, delivery code) | **Simulated by a provider portal page** (`/provider`, with separate Provider and Courier tabs, no login) that you operate in a second window. Orders live in server memory. In a real version each confirmation would arrive from the provider's own system as a signed message, and the verifier would compare it with the rule before any escrow releases the money. |
-| NEAR Intents payment / on-chain escrow | **Not implemented.** Payment, escrow, confirmation and dispute pool are simulated in the page. |
+| Payments and escrow | **Simulated by default.** With the optional testnet mode they are real transfers of test NEAR (verified signing, explorer links), but the escrow is an account the server controls, not a contract. **NEAR Intents is not implemented**, there is no on-chain escrow contract and no on-chain dispute pool. Nothing runs on mainnet. |
 | Real money | None. |
 
 ## Files
@@ -100,6 +106,7 @@ requests `GET /v1/attestation/report` with a fresh random nonce and the page sho
 - `rules.js` deterministic checks and the "only stricter" combination rule
 - `verifier.js` NEAR AI Cloud call, reply parsing, fallback modes (`demo`, `live`, `rules-only`), attestation report fetch
 - `server.js` dependency-free HTTP server; `/api/state`, `/api/check`, `/api/attestation`
+- `chain.js` optional NEAR testnet payments (signing, transfers, explorer links); `scripts/testnet.js` creates the test keys
 - `near.js` read-only NEAR RPC check of an account's access keys
 - `agent.js` the offer-choosing agent (NEAR AI Cloud or simulated)
 - `orders.js` the provider-side flows (receipt, policy, inspection, shop), their validation and final checks

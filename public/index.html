@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Approval Moment – prototype</title>
+<title>Approval Moment – payment verifier for AI agents</title>
 <style>
 :root{--bg:#f6f5f1;--card:#fff;--ink:#1c1b19;--mute:#6b6962;--line:#e3e0d8;--ok:#1f7a4d;--warn:#a86a00;--bad:#b3261e;--okbg:#e6f4ec;--warnbg:#fff3dc;--badbg:#fde8e6;--acc:#2f4bd6;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151513;--card:#201f1c;--ink:#f1efe9;--mute:#a09d94;--line:#34322d;--ok:#5fd08f;--warn:#f0b04a;--bad:#ff8a80;--okbg:#17301f;--warnbg:#33290f;--badbg:#3a1a18;--acc:#8ea2ff}}
@@ -46,6 +46,18 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:13px;word-break:break-al
 .ia button,.ia select,.ia input{font:inherit;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
 .ia button.go{background:var(--acc);color:#fff;border-color:var(--acc)}
 .empty{color:var(--mute);padding:8px 0}
+.shield{display:inline-flex;align-items:center;gap:8px;font:inherit;font-size:14px;padding:8px 14px;border-radius:999px;border:1px solid var(--ok);background:var(--okbg);color:var(--ink);cursor:pointer;transition:background .3s,border-color .3s}
+.shield.alert{border-color:var(--bad);background:var(--badbg);animation:shake .6s}
+@keyframes shake{20%{transform:translateX(-4px)}40%{transform:translateX(4px)}60%{transform:translateX(-3px)}80%{transform:translateX(3px)}}
+@media (prefers-reduced-motion:reduce){.shield.alert{animation:none}}
+#drawer{position:fixed;inset:0;z-index:50;display:none}
+#drawer.open{display:block}
+#drawer .back{position:absolute;inset:0;background:rgba(0,0,0,.5)}
+#drawer .panel{position:absolute;top:0;right:0;bottom:0;width:min(780px,100vw);background:var(--bg);border-left:1px solid var(--line);display:flex;flex-direction:column;animation:slide .25s ease}
+@keyframes slide{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+#drawer .bar{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
+#drawer .bar button{font:inherit;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+#drawer iframe{flex:1;border:0;width:100%}
 .btnlink{display:inline-block;padding:12px 18px;border-radius:10px;border:1px solid var(--acc);background:var(--acc);color:#fff;text-decoration:none}
 
 .layout{display:block}
@@ -78,8 +90,8 @@ details summary{cursor:pointer;color:var(--mute);font-size:14px}
 <main>
 <h1>Approval Moment</h1>
 <p class="sub">An agent keeps track of your yearly payments and buys things for you. Before any money moves, a separate verifier compares the agent's plan with your rule.</p>
-<div class="note demo" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><span><a href="/suite">Attack suite: see how the verifier scores against all demo attacks</a></span></div>
-<div class="note demo">Demo data: insurers, schools, shops, inspection centers, offers and payments are simulated. No real money moves.</div>
+<div style="margin:0 0 12px"><button class="shield" id="shield" aria-haspopup="dialog">🛡 <span id="shieldtxt">Checking the security scorecard…</span></button> <span id="chainchip"></span></div>
+<div class="note demo" id="demonote">Demo data: insurers, schools, shops, inspection centers, offers and payments are simulated. No real money moves.</div>
 <div class="layout">
 <div class="col">
 <h2>Your agent's wallet key (NEAR)</h2>
@@ -97,6 +109,7 @@ details summary{cursor:pointer;color:var(--mute);font-size:14px}
 </div>
 <p class="foot">Prototype: *escrow is used only for purchases and bookings; known payees such as the school or an insurer are paid directly. Provider replies come from the separate provider portal (simulated) and the dispute step is simulated. If a NEAR AI key is set, the verifier also runs on NEAR AI Cloud and the page shows the attestation report summary.</p>
 </main>
+<div id="drawer" role="dialog" aria-modal="true" aria-label="Security scorecard"><div class="back" id="dback"></div><div class="panel"><div class="bar"><b>Security scorecard</b><button id="dclose">Close</button></div><iframe id="dframe" title="Attack suite" src="about:blank"></iframe></div></div>
 <script>
 const $=id=>document.getElementById(id);
 const esc=t=>String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -112,6 +125,15 @@ const days=due=>Math.round((Date.parse(due+"T00:00:00Z")-Date.parse(ST.today+"T0
 const addDays=n=>new Date(Date.parse(ST.today+"T00:00:00Z")+n*DAY).toISOString().slice(0,10);
 const st=id=>status[id]||"idle";
 const money=n=>"$"+n;
+function usePromo(p){const S=sess[sel];return !!(p.promo&&S&&S.promo&&S.promo[p.id]===true)}
+function effPlan(p){if(!usePromo(p))return p.plan;const saved=Math.round(p.plan.price*p.promo.percent)/100;return Object.assign({},p.plan,{price:Math.round((p.plan.price-saved)*100)/100,promo:{code:p.promo.code,percent:p.promo.percent,saved:saved}})}
+function promoCard(it,p,due,settled){
+if(!p.promo)return"";
+const saved=Math.round(p.plan.price*p.promo.percent)/100,np=Math.round((p.plan.price-saved)*100)/100,on=usePromo(p);
+const dd=due?days(due):null;
+const why='<div class="m" style="color:var(--mute);font-size:14px">The code sits in text a human cannot see, so the agent will <b>not</b> use it on its own. It asks you instead.'+(due?' This renewal is due on '+esc(due)+' (in '+dd+' days), but the offer is valid today only: paying today would save '+money(saved)+'.':'')+'</div>';
+if(on)return '<h2>Savings found</h2><div class="card"><div class="verdict ok" style="margin-top:0">Discount code '+esc(p.promo.code)+' applied with your approval: '+money(p.plan.price)+' → '+money(np)+' ('+money(saved)+' saved).</div>'+(settled?'':'<div class="actions"><button data-promo="skip">Undo the discount</button></div>')+'</div>';
+return '<h2>Savings found</h2><div class="card"><b>💡 Discount code '+esc(p.promo.code)+': '+p.promo.percent+'% off</b><div style="margin:6px 0">'+money(p.plan.price)+' → '+money(np)+' ('+money(saved)+' saved)</div>'+why+(settled?'':'<div class="actions"><button class="go" data-promo="use">Use the code</button><button data-promo="skip">No thanks</button></div>')+'</div>'}
 function rows(list){return list.map(r=>'<div class="row"><b>'+esc(r[0])+'</b><span class="v">'+esc(r[1])+'</span>'+(r[2]?'<span class="st '+r[2]+'">'+(r[2]==="ok"?"✓":r[2]==="warn"?"!":"✗")+'</span>':'')+'</div>').join("")}
 
 /* ---------- side panel: animated flow + plain-language log ---------- */
@@ -155,15 +177,15 @@ function openItem(id){sel=id;pi=0;renderList();renderWork();$("work").scrollInto
 function renderWork(){
 const it=sel&&item(sel);
 if(!it||(!it.oneOff&&!list.some(x=>x.id===sel))){sel=null;$("work").innerHTML="";return}
-const p=it.proposals[pi],S=sess[sel]||(sess[sel]={receipt:"",order:null,rc:null,ev:[],seen:0});
+const p=it.proposals[pi],S=sess[sel]||(sess[sel]={receipt:"",order:null,rc:null,ev:[],seen:0}),ep=effPlan(p),settled=FINAL.includes(st(sel));
 const due=it.oneOff?null:list.find(x=>x.id===sel).due;
 $("work").innerHTML='<h2>'+esc(it.title)+(due?' · due '+esc(due):'')+'</h2>'+
 '<h2>1. What the agent comes back with</h2><div class="tabs" id="tabs">'+it.proposals.map((x,i)=>'<button aria-pressed="'+(i===pi)+'" data-i="'+i+'">'+esc(x.label)+'</button>').join("")+'</div>'+
 '<div class="ia" style="margin-top:10px"><button class="go" id="ag">Let the agent choose</button><span class="m" style="color:var(--mute);font-size:14px">The agent reads all offers and picks one. The verifier then checks that choice.</span></div>'+(S.agent&&S.agent.pi===pi?'<div class="note" style="background:var(--okbg)"><b>Agent ('+esc(S.agent.mode==="live"?"NEAR AI Cloud":S.agent.mode==="demo"?"simulated agent, no key":"fallback")+'):</b> '+esc(S.agent.why)+'</div>':'')+
 '<h2>2. Your rule and the agent</h2><div class="card"><div class="b me">'+esc(it.instruction)+'</div><div class="b ai">'+esc(it.agentSays)+'</div></div>'+
-'<h2>3. Payment plan prepared by the agent</h2><div class="card">'+rows([["Item",p.plan.item],["Price",money(p.plan.price)],["Pay to",p.plan.to]].concat(Object.entries(p.plan.attrs||{}).map(e=>[e[0][0].toUpperCase()+e[0].slice(1),e[1]])).concat(p.plan.slot?[["Appointment",p.plan.slot]]:[]))+'</div>'+
+'<h2>3. Payment plan prepared by the agent</h2><div class="card">'+rows([["Item",p.plan.item],["Price",money(ep.price)],["Pay to",p.plan.to]].concat(Object.entries(p.plan.attrs||{}).map(e=>[e[0][0].toUpperCase()+e[0].slice(1),e[1]])).concat(p.plan.slot?[["Appointment",p.plan.slot]]:[]))+'</div>'+
 '<h2>4. Page the agent read</h2><div class="card"><div class="pg"><b>'+esc(p.plan.item)+'</b><div>'+esc(p.page.visible)+'</div><div class="m">Payee: '+esc(p.plan.seller)+'</div>'+(p.page.hidden?'<div class="hid"><b>Text invisible to the eye (the agent read it):</b><br>'+esc(p.page.hidden)+'</div>':'')+'</div></div>'+
-'<h2>5. Verifier result</h2><div class="card" id="chk"><div class="empty">Checking…</div></div><div id="verdict"></div>'+
+promoCard(it,p,due,settled)+'<h2>5. Verifier result</h2><div class="card" id="chk"><div class="empty">Checking…</div></div><div id="verdict"></div>'+
 '<div class="actions"><button class="go" id="ok" disabled>Approve</button><button id="no">Reject</button></div><div id="out">'+(S.pi===pi?S.receipt:FINAL.includes(st(sel))&&S.pi!==undefined?'<div class="note" style="margin-top:14px">This obligation is already settled with another proposal ("'+esc(it.proposals[S.pi].label)+'"). Nothing more can be paid for it in this demo.</div>':'')+'</div><div id="dlv"></div>'+
 '<h2>Evidence</h2><div class="card" id="evid"></div>';
 result=null;
@@ -171,7 +193,7 @@ story=[];flow(0);const lg=$("log");if(lg)lg.innerHTML="";
 say("You opened “"+it.title+"”."+(due?" It is due on "+due+".":""));
 say("Your standing rule is the only instruction the system trusts: “"+it.instruction+"”");
 setTimeout(()=>{if(sel===it.id&&!result)flow(1)},250);
-say("The agent looked at “"+p.label+"” and prepared a plan: "+p.plan.item+", "+money(p.plan.price)+", pay to "+p.plan.to+"."+(p.page.hidden?" The page also contained text a human cannot see, and the agent read it too.":""));
+say("The agent looked at “"+p.label+"” and prepared a plan: "+p.plan.item+", "+money(ep.price)+", pay to "+p.plan.to+"."+(p.page.hidden?" The page also contained text a human cannot see, and the agent read it too.":""));
 dlv();renderEvidence();runCheck()}
 
 function summary(d){const rr=d.rules.rows,n=rr.length,f=rr.filter(r=>r[1]==="bad").map(r=>r[0]),w=rr.filter(r=>r[1]==="warn").map(r=>r[0]);
@@ -182,7 +204,7 @@ const my=++seq,it=item(sel),p=it.proposals[pi];
 say("The verifier now compares the plan with your rule, twice and independently: fixed rules first, then an AI model.");
 setTimeout(()=>{if(my===seq&&!result)flow(2,"pending")},900);
 try{
-const r=await fetch("/api/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({item:it.id,proposal:p.id})});
+const r=await fetch("/api/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({item:it.id,proposal:p.id,promo:usePromo(p)})});
 if(!r.ok)throw new Error("HTTP "+r.status);
 const d=await r.json();
 if(my!==seq)return;
@@ -195,6 +217,7 @@ const fin=FINAL.includes(st(it.id));
 $("ok").disabled=d.verdict==="bad"||fin;$("ok").textContent=d.verdict==="warn"?"Approve anyway":"Approve";
 if(!fin){status[it.id]=d.verdict==="ok"?"ready":d.verdict==="warn"?"attention":"blocked";renderList()}
 flow(2,d.verdict);
+lastCase=it.id+"/"+p.id;if(d.verdict==="bad")shieldAlert();
 say(summary(d),d.rules.verdict);
 say(d.mode==="live"?"NEAR AI Cloud ("+d.ai.model+") looked at the same facts and said: "+d.ai.reasons.join(" · ")+" (its own verdict: "+d.ai.verdict+")."+(ATTD&&ATTD.ok?" It runs inside secure hardware; the attestation report in the Evidence box is the proof.":""):d.mode==="rules-only"?"NEAR AI Cloud could not be reached ("+d.error+"), so only the fixed rules decided.":"No NEAR AI key is set, so only the fixed rules ran (demo mode).",d.mode==="live"?d.ai.verdict:"");
 say("Final decision: "+T[d.verdict]+" It is always the stricter of the two: the AI can tighten a decision but can never loosen one.",d.verdict);
@@ -210,7 +233,35 @@ else if(d.ok)ATT="🛡️ NEAR AI attestation report received: "+(d.nonceMatched
 else ATT="Attestation report could not be fetched ("+d.error+").";
 }catch(e){ATT="";ATTD=null}showAtt();renderEvidence()}
 
+/* ---------- optional NEAR testnet mode ---------- */
+let CH=null;
+const short=t=>t?t.slice(0,8)+"…"+t.slice(-4):"";
+async function loadChain(){try{const r=await fetch("/api/chain/status");CH=await r.json();
+if(CH.enabled){$("demonote").textContent="NEAR testnet mode: payments are real transfers of TEST NEAR (no real money). Insurers, schools, shops and offers are still simulated. Demo rate: $1 = 0.001 test NEAR.";
+$("chainchip").innerHTML='<span class="shield" style="cursor:default">⛓ NEAR testnet · agent wallet '+esc(CH.agent.near===undefined?"?":CH.agent.near===null?"0 (not funded)":CH.agent.near)+' · escrow '+esc(CH.escrow.near===undefined?"?":CH.escrow.near===null?"0 (not funded)":CH.escrow.near)+' · <a href="'+esc(CH.agent.url)+'" target="_blank" rel="noopener">agent address ↗</a></span>'}}catch(e){CH=null}}
+function chainEvents(evs){for(const ev of evs){if(ev.actor!=="chain")continue;const d=ev.data||{};
+if(ev.action==="error"){say("The on-chain transfer did not go through: "+d.message,"warn");continue}
+const what=ev.action==="payment"?"Payment sent on NEAR testnet":ev.action==="release"?"The escrow released the money on chain":"The escrow refunded your money on chain";
+say(what+": "+d.near+" test NEAR. Transaction "+String(d.hash).slice(0,10)+"… (see it in the explorer card below).","ok")}}
+function chainCard(o){if(!o.chain||!o.chain.txs.length)return"";
+return '<div class="card" style="margin-top:12px"><b>⛓ On-chain (NEAR testnet)</b>'+o.chain.txs.map(t=>'<div class="row"><b>'+esc(t.kind==="payment"?"1 · Payment":t.kind==="release"?"2 · Release":"2 · Refund")+'</b><span class="v">'+esc(t.near)+' test NEAR<br>'+esc(t.fromLabel||short(t.from))+' → <b>'+esc(t.toLabel||short(t.to))+'</b>'+(t.fromBefore?'<br>'+esc(t.fromLabel||"Sender")+' balance: <b>'+esc(t.fromBefore)+' → '+esc(t.fromAfter)+'</b> test NEAR'+(t.feeNear?' <span style="color:var(--mute)">(includes network fee '+esc(t.feeNear)+')</span>':''):'')+'<br><a href="'+esc(t.explorer)+'" target="_blank" rel="noopener">'+esc(String(t.hash).slice(0,16))+'… ↗</a></span></div>').join("")+'<div class="m" style="color:var(--mute);font-size:13px;margin-top:6px">The escrow here is a testnet account this server controls, not an escrow contract.</div></div>'}
+
+/* ---------- security badge + scorecard drawer ---------- */
+let lastCase=null;
+function openDrawer(hash){$("dframe").src="/suite?embed=1"+(hash?"#"+hash:"");$("drawer").classList.add("open");$("dclose").focus()}
+function closeDrawer(){$("drawer").classList.remove("open");$("dframe").src="about:blank";$("shield").focus()}
+$("shield").addEventListener("click",()=>openDrawer(lastCase));
+$("dclose").addEventListener("click",closeDrawer);$("dback").addEventListener("click",closeDrawer);
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("drawer").classList.contains("open"))closeDrawer()});
+let shieldBase="";
+async function loadShield(){try{const r=await fetch("/api/suite",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});const d=await r.json(),s=d.summary;
+shieldBase="Security scorecard: "+s.attacksBlocked+"/"+s.attacks+" attacks blocked by the fixed rules";$("shieldtxt").textContent=shieldBase+" · open"}catch(e){$("shieldtxt").textContent="Security scorecard"}}
+function shieldAlert(){const b=$("shield");b.classList.remove("alert");void b.offsetWidth;b.classList.add("alert");$("shieldtxt").textContent="Blocked an attack · see it in the scorecard";
+setTimeout(()=>{b.classList.remove("alert");$("shieldtxt").textContent=shieldBase+" · open"},5000)}
+
 /* ---------- NEAR agent key policy ---------- */
+try{const sa=localStorage.getItem("am-acc");if(sa&&!$("nacc").value)$("nacc").value=sa}catch(e){}
+$("nacc").addEventListener("change",()=>{try{localStorage.setItem("am-acc",$("nacc").value.trim())}catch(e){}});
 let NEARK=null;
 $("nbtn").addEventListener("click",async()=>{
 const b=$("nbtn"),o=$("nres");b.disabled=true;o.innerHTML='<div class="empty">Asking the NEAR network…</div>';
@@ -231,12 +282,12 @@ const att=ATTD&&ATTD.ok?{nonceMatched:ATTD.nonceMatched,requestNonce:ATTD.reques
 return{app:"Approval Moment",created:new Date().toISOString(),
 obligation:{id:it.id,title:it.title,category:it.category},
 yourRule:{text:it.instruction,data:it.rule},
-agentProposal:{id:p.id,label:p.label,plan:p.plan,pageTheAgentRead:p.page},
+agentProposal:{id:p.id,label:p.label,plan:effPlan(p),discountCodeUsed:usePromo(p)?p.promo.code:null,pageTheAgentRead:p.page},
 verifier:result?{mode:result.mode,finalVerdict:result.verdict,fixedRules:result.rules,nearAiCloud:result.ai||null,error:result.error||null}:null,
 attestation:att,
 agentKeyPolicyOnNear:NEARK,
 approvalReceipt:S.pi===pi&&S.rc?{time:S.rc.time,digestSha256:S.rc.digest,preimage:S.rc.preimage,howToCheck:"SHA-256 of the exact preimage string equals digestSha256."}:null,
-afterApproval:S.pi===pi?(S.ev||[]):[],orderOnServer:S.pi===pi&&S.order?{id:S.order.id,status:S.order.status,payMode:S.order.payMode,steps:S.order.steps}:null}}
+afterApproval:S.pi===pi?(S.ev||[]):[],orderOnServer:S.pi===pi&&S.order?{id:S.order.id,status:S.order.status,payMode:S.order.payMode,steps:S.order.steps}:null,onChainTestnet:S.pi===pi&&S.order&&S.order.chain?S.order.chain:null}}
 function evText(full){const b=bundle();if(!b)return"";return JSON.stringify(b,(k,v)=>!full&&k==="intelQuoteHex"&&typeof v==="string"&&v.length>96?v.slice(0,96)+"… ("+v.length/2+" bytes in the downloaded file)":v,2)}
 function renderEvidence(){const e=$("evid");if(!e)return;
 if(!result){e.innerHTML='<div class="empty">Evidence appears when the verifier has answered.</div>';return}
@@ -257,20 +308,21 @@ async function sha(t){try{const b=await crypto.subtle.digest("SHA-256",new TextE
 async function approve(){
 if(!result||result.verdict==="bad"||FINAL.includes(st(sel)))return;
 const it=item(sel),p=it.proposals[pi],t=new Date().toISOString(),S=sess[sel];
-const pre=JSON.stringify({rule:it.rule,plan:p.plan,verdict:result.verdict,t});
+const pre=JSON.stringify({rule:it.rule,plan:effPlan(p),verdict:result.verdict,t});
 const h=await sha(pre);
-$("ok").disabled=true;
+$("ok").disabled=true;const okTxt=$("ok").textContent;if(CH&&CH.enabled)$("ok").textContent="Sending on NEAR testnet…";
 let o;
-try{const r=await fetch("/api/orders",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({item:sel,proposal:p.id,digest:h})});
+try{const r=await fetch("/api/orders",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({item:sel,proposal:p.id,digest:h,promo:usePromo(p)})});
 const d=await r.json();if(!r.ok)throw new Error(d.error||"HTTP "+r.status);o=d}
-catch(e){$("out").innerHTML='<div class="note" style="background:var(--badbg)">Could not create the order: '+esc(e.message)+'</div>';$("ok").disabled=false;return}
+catch(e){$("out").innerHTML='<div class="note" style="background:var(--badbg)">Could not create the order: '+esc(e.message)+'</div>';$("ok").disabled=false;$("ok").textContent=okTxt;return}
 S.rc={time:t,digest:h,preimage:pre};
 S.receipt='<div class="card" style="margin-top:14px"><b>Approval receipt</b><div class="row"><b>Time</b><span class="v">'+esc(t)+'</span></div><div class="row"><b>Decision</b><span class="v">You approved (verifier result: '+esc(result.verdict)+')</span></div><div class="row"><b>Digest (SHA-256)</b><span class="v"><code>'+esc(h)+'</code></span></div><div class="note">This digest seals your rule, the plan and the verifier result together. If any of them is changed later, the digest no longer matches. The exact text that was hashed is in the Evidence box.</div></div>';
-S.pi=pi;S.ev=[];S.order=o;S.seen=0;$("out").innerHTML=S.receipt;
+S.pi=pi;S.ev=[];S.order=o;S.seen=o.events.length;$("ok").textContent=okTxt;$("out").innerHTML=S.receipt;document.querySelectorAll("#work [data-promo]").forEach(x=>{const w=x.closest(".actions");if(w)w.remove()});
 status[sel]=ordStatus(o);renderList();dlv();
 say("You approved. A receipt was created: the SHA-256 digest "+h.slice(0,12)+"… seals your rule, the plan and the verifier result.","ok");
 if(o.payMode==="direct"){flow(4,"pending");say("Payment sent directly to "+o.provider+" (simulated). It is a saved payee with a due date, so there is no escrow. Now "+o.provider+" has to confirm; open the provider portal to play them.")}
 else{flow(3,"ok");say("The money moved into escrow (simulated): it waits in a safe vault, not with "+o.provider+" yet. Open the provider portal to play them.")}
+chainEvents(o.events);if(CH&&CH.enabled)loadChain();
 renderEvidence()}
 function reject(){
 if(FINAL.includes(st(sel)))return;
@@ -291,10 +343,11 @@ const M={completed:["ok","Completed. "+(o.payMode==="escrow"?"The escrow release
 const r=M[o.status]?'<div class="verdict '+M[o.status][0]+'">'+esc(M[o.status][1])+'</div>':"";
 const hold=o.canConfirm?'<div class="verdict warn">The provider\'s proof matched your rule, but the money is still in escrow. Check what you received, then confirm or report a problem.</div>':"";
 const wait=o.status==="open"&&o.waitingFor?'<div class="m" style="color:var(--mute);font-size:14px;margin-top:8px">Waiting for '+esc(o.provider)+': “'+esc(o.waitingFor)+'”. Their answer appears here by itself.</div>':"";
-e.innerHTML='<h2>6. After you approve</h2><div class="card">'+rows(L)+'<div class="note">'+esc(o.payMode==="escrow"?RE:RD)+'</div></div>'+hold+code+wait+(b?'<div class="actions">'+b+'</div>':'')+r}
+e.innerHTML='<h2>6. After you approve</h2><div class="card">'+rows(L)+'<div class="note">'+esc(o.payMode==="escrow"?RE:RD)+'</div></div>'+chainCard(o)+hold+code+wait+(b?'<div class="actions">'+b+'</div>':'')+r}
 
 function stage(a){
 const S=sess[sel],o=S&&S.pi===pi?S.order:null;if(!o||!["expire","accept","report","timeout"].includes(a))return;
+if(CH&&CH.enabled)say("Waiting for NEAR testnet to confirm the transfer…");
 fetch("/api/orders/"+o.id+(a==="expire"?"/expire":"/buyer"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:a})}).then(r=>r.json()).then(d=>{if(d.error)say(d.error,"warn")}).catch(()=>say("Could not reach the server.","warn"))}
 
 async function askAgent(btn){
@@ -314,6 +367,7 @@ const key=Object.keys(sess).find(k=>sess[k].order&&sess[k].order.id===id);if(!ke
 let o;try{const r=await fetch("/api/orders/"+id);if(!r.ok)return;o=await r.json()}catch(e){return}
 const S=sess[key];S.order=o;status[key]=ordStatus(o);
 const evs=o.events.slice(S.seen);S.seen=o.events.length;
+chainEvents(evs);if(evs.some(e=>e.actor==="chain")&&CH&&CH.enabled)loadChain();
 for(const ev of evs){S.ev.push({time:ev.time,actor:ev.actor,event:ev.action,data:ev.data});
 if(ev.actor==="provider"){const step=o.steps.find(x=>x.key===ev.action);
 say("Message from "+o.provider+": "+(step?step.label+". "+step.detail:ev.action)+"."+(o.payMode==="escrow"?" The money is still in escrow.":""));if(o.status==="open")flow(o.payMode==="escrow"?3:4,"ok")}
@@ -329,6 +383,8 @@ try{const es=new EventSource("/api/stream");es.addEventListener("order",m=>{try{
 
 $("work").addEventListener("click",e=>{const b=e.target.closest("button");if(!b||b.dataset.ev)return;
 if(b.dataset.i!==undefined){pi=+b.dataset.i;renderWork();return}
+if(b.dataset.promo){if(FINAL.includes(st(sel)))return;const p=item(sel).proposals[pi];const S=sess[sel]||(sess[sel]={receipt:"",order:null,rc:null,ev:[],seen:0});(S.promo||(S.promo={}))[p.id]=b.dataset.promo==="use";const on=b.dataset.promo==="use";renderWork();
+say(on?"You agreed to use the discount code "+p.promo.code+". The agent updated the plan to "+money(effPlan(p).price)+" and the verifier checked the new plan again.":"You did not use the discount code. The plan stays at "+money(p.plan.price)+".",on?"ok":"");return}
 if(b.id==="ag"){askAgent(b);return}
 if(b.id==="ok")approve();else if(b.id==="no")reject();else if(b.dataset.a)stage(b.dataset.a)});
 $("list").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;const id=b.closest(".item").dataset.id;
@@ -344,7 +400,7 @@ renderStory();
 try{
 const r=await fetch("/api/state");if(!r.ok)throw new Error("HTTP "+r.status);
 ST=await r.json();list=ST.items.filter(x=>!x.oneOff).map(x=>({id:x.id,due:addDays(x.dueInDays)}));
-renderList();loadAtt();
+renderList();loadAtt();loadShield();loadChain();
 }catch(e){$("list").innerHTML='<div class="note">Could not load the demo data ('+esc(e.message)+'). Start the app with <code>npm start</code> and open http://localhost:3000.</div>'}
 })();
 </script>
