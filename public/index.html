@@ -84,27 +84,69 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:13px;word-break:break-al
 .evb button{font:inherit;font-size:14px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
 pre.ev{white-space:pre-wrap;word-break:break-all;font-size:12px;max-height:340px;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0 0}
 details summary{cursor:pointer;color:var(--mute);font-size:14px}
+
+/* ---------- one-screen layout: list | work | story ---------- */
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;margin-bottom:6px}
+.top h1{margin:0;font-size:24px}.top .sub{margin:0;flex:1 1 360px;font-size:14px}.top .chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.demo{padding:6px 12px;font-size:13px;margin:0 0 8px}
+#keybox summary{cursor:pointer;color:var(--mute);font-size:13px;letter-spacing:.06em;text-transform:uppercase;margin:6px 0}
+#keybox[open] summary{margin-bottom:8px}
+.wtitle{margin-top:0}
+#work:empty:before{content:"Pick an obligation on the left to start.";display:block;color:var(--mute);padding:24px 4px}
+.wgrid{display:block}
+@media (min-width:1150px) and (min-height:640px){
+ html,body{height:100%;overflow:hidden}
+ body{font-size:14px}
+ main{max-width:none;height:100vh;box-sizing:border-box;padding:10px 16px 6px;display:flex;flex-direction:column}
+ .top h1{font-size:20px}.top .sub{font-size:13px;flex-basis:420px}
+ .layout{flex:1;min-height:0;display:grid;grid-template-columns:292px minmax(0,1fr) 320px;gap:14px;align-items:stretch}
+ .rail{overflow:auto;min-height:0;padding-right:4px}
+ #work{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+ .wgrid{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+ .wcol{overflow:auto;min-height:0;padding-right:4px}
+ .wcol>h2:first-child{margin-top:0}
+ #story{position:static;margin:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+ #story .side{flex:1;min-height:0;display:flex;flex-direction:column}
+ #story .log{max-height:none;flex:1;min-height:0}
+ h2{margin:12px 0 6px;font-size:12px}
+ .card{padding:9px 12px}.row{padding:5px 0;gap:8px}.row b{min-width:92px}
+ .b{padding:6px 10px;margin:4px 0}.tabs button{flex:1 1 110px;padding:6px 8px}
+ .verdict{padding:8px 12px;margin-top:8px}.note{margin-top:6px;padding:6px 10px;font-size:13px}
+ .actions{margin-top:8px}.actions button{padding:9px 16px}
+ .rail .item{margin-bottom:6px;padding:7px 10px}.rail .im{font-size:12px;margin:2px 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .rail .ia{font-size:12px;gap:6px}.rail .ia button,.rail .ia input,.rail .ia select{padding:3px 8px}.rail .ia input[type=date]{width:112px}
+ .rail h2{margin:8px 0 4px}.rail .tl{margin-top:2px}
+ body{font-size:13px}.top .sub{font-size:12px}.card{font-size:13px}.b{font-size:13px;max-width:96%}.tabs button{font-size:12px}
+ .layout{grid-template-columns:318px minmax(0,1fr) 300px}
+ .rail .tick{display:none}
+ .rail .ih b{font-size:13px}.rail .ia label{font-size:12px}.rail .ia input[type=date]{width:104px;font-size:12px}.rail .ia button{font-size:12px}
+ .rail .badge{font-size:11px;padding:1px 8px}
+ #ag+.m{display:none}
+ #dlv .row{flex-wrap:wrap}#dlv .row span.v{flex:1 1 150px}
+ .log{font-size:13px}.row span.v{font-size:13px}
+ .foot{margin:4px 0 0;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+}
 </style>
 </head>
 <body>
 <main>
-<h1>Approval Moment</h1>
+<div class="top"><h1>Approval Moment</h1>
 <p class="sub">An agent keeps track of your yearly payments and buys things for you. Before any money moves, a separate verifier compares the agent's plan with your rule.</p>
-<div style="margin:0 0 12px"><button class="shield" id="shield" aria-haspopup="dialog">🛡 <span id="shieldtxt">Checking the security scorecard…</span></button> <span id="chainchip"></span></div>
+<div class="chips"><button class="shield" id="shield" aria-haspopup="dialog">🛡 <span id="shieldtxt">Checking the security scorecard…</span></button> <span id="chainchip"></span></div></div>
 <div class="note demo" id="demonote">Demo data: insurers, schools, shops, inspection centers, offers and payments are simulated. No real money moves.</div>
 <div class="layout">
-<div class="col">
-<h2>Your agent's wallet key (NEAR)</h2>
+<div class="col rail">
+<details id="keybox"><summary>Agent wallet key (NEAR)</summary>
 <div class="card" id="nearbox"><div class="im" style="margin:0 0 8px">A safe agent holds a function-call key, not a full-access key. Enter a NEAR account to list its keys, or add the agent's <b>public</b> key (starts with ed25519:) to check just that one. The data is read from NEAR. Nothing is signed and no secret is needed. Never paste a seed phrase or a private key here.</div>
-<div class="ia"><select id="nnet"><option value="testnet">testnet</option><option value="mainnet">mainnet</option></select><input id="nacc" placeholder="account, e.g. alice.testnet" size="22" autocomplete="off"><input id="nkey" placeholder="ed25519:… (optional public key)" size="30" autocomplete="off"><button class="go" id="nbtn">Check key</button></div><div id="nres"></div></div>
+<div class="ia"><select id="nnet"><option value="testnet">testnet</option><option value="mainnet">mainnet</option></select><input id="nacc" placeholder="account, e.g. alice.testnet" size="22" autocomplete="off"><input id="nkey" placeholder="ed25519:… (optional public key)" size="30" autocomplete="off"><button class="go" id="nbtn">Check key</button></div><div id="nres"></div></div></details>
 <h2>Your next 12 months</h2>
 <div id="tl"></div>
 <div id="list"></div>
 <div id="adder"></div>
 <h2>Need something right now?</h2>
 <div id="shop"></div>
-<div id="work"></div>
 </div>
+<section id="work" aria-live="polite"></section>
 <aside id="story"></aside>
 </div>
 <p class="foot">Prototype: *escrow is used only for purchases and bookings; known payees such as the school or an insurer are paid directly. Provider replies come from the separate provider portal (simulated) and the dispute step is simulated. If a NEAR AI key is set, the verifier also runs on NEAR AI Cloud and the page shows the attestation report summary.</p>
@@ -171,7 +213,7 @@ $("shop").innerHTML='<div class="card item'+(sel===it.id?' sel':'')+'" data-id="
 '<div class="im">'+esc(it.category)+' · '+Object.entries(at).map(e=>esc(e[0]+" "+e[1])).join(", ")+' · up to '+money(it.rule.max)+'</div>'+
 '<div class="ia"><button class="go" data-a="open">Ask the agent to buy</button></div></div>'}
 
-function openItem(id){sel=id;pi=0;renderList();renderWork();$("work").scrollIntoView({behavior:"smooth",block:"start"})}
+function openItem(id){sel=id;pi=0;renderList();renderWork();if(!matchMedia("(min-width:1150px) and (min-height:640px)").matches)$("work").scrollIntoView({behavior:"smooth",block:"start"})}
 
 /* ---------- work area for the selected item ---------- */
 function renderWork(){
@@ -179,15 +221,15 @@ const it=sel&&item(sel);
 if(!it||(!it.oneOff&&!list.some(x=>x.id===sel))){sel=null;$("work").innerHTML="";return}
 const p=it.proposals[pi],S=sess[sel]||(sess[sel]={receipt:"",order:null,rc:null,ev:[],seen:0}),ep=effPlan(p),settled=FINAL.includes(st(sel));
 const due=it.oneOff?null:list.find(x=>x.id===sel).due;
-$("work").innerHTML='<h2>'+esc(it.title)+(due?' · due '+esc(due):'')+'</h2>'+
+$("work").innerHTML='<h2 class="wtitle">'+esc(it.title)+(due?' · due '+esc(due):'')+'</h2><div class="wgrid"><div class="wcol">'+
 '<h2>1. What the agent comes back with</h2><div class="tabs" id="tabs">'+it.proposals.map((x,i)=>'<button aria-pressed="'+(i===pi)+'" data-i="'+i+'">'+esc(x.label)+'</button>').join("")+'</div>'+
 '<div class="ia" style="margin-top:10px"><button class="go" id="ag">Let the agent choose</button><span class="m" style="color:var(--mute);font-size:14px">The agent reads all offers and picks one. The verifier then checks that choice.</span></div>'+(S.agent&&S.agent.pi===pi?'<div class="note" style="background:var(--okbg)"><b>Agent ('+esc(S.agent.mode==="live"?"NEAR AI Cloud":S.agent.mode==="demo"?"simulated agent, no key":"fallback")+'):</b> '+esc(S.agent.why)+'</div>':'')+
 '<h2>2. Your rule and the agent</h2><div class="card"><div class="b me">'+esc(it.instruction)+'</div><div class="b ai">'+esc(it.agentSays)+'</div></div>'+
 '<h2>3. Payment plan prepared by the agent</h2><div class="card">'+rows([["Item",p.plan.item],["Price",money(ep.price)],["Pay to",p.plan.to]].concat(Object.entries(p.plan.attrs||{}).map(e=>[e[0][0].toUpperCase()+e[0].slice(1),e[1]])).concat(p.plan.slot?[["Appointment",p.plan.slot]]:[]))+'</div>'+
 '<h2>4. Page the agent read</h2><div class="card"><div class="pg"><b>'+esc(p.plan.item)+'</b><div>'+esc(p.page.visible)+'</div><div class="m">Payee: '+esc(p.plan.seller)+'</div>'+(p.page.hidden?'<div class="hid"><b>Text invisible to the eye (the agent read it):</b><br>'+esc(p.page.hidden)+'</div>':'')+'</div></div>'+
-promoCard(it,p,due,settled)+'<h2>5. Verifier result</h2><div class="card" id="chk"><div class="empty">Checking…</div></div><div id="verdict"></div>'+
+promoCard(it,p,due,settled)+'</div><div class="wcol"><h2>5. Verifier result</h2><div class="card" id="chk"><div class="empty">Checking…</div></div><div id="verdict"></div>'+
 '<div class="actions"><button class="go" id="ok" disabled>Approve</button><button id="no">Reject</button></div><div id="out">'+(S.pi===pi?S.receipt:FINAL.includes(st(sel))&&S.pi!==undefined?'<div class="note" style="margin-top:14px">This obligation is already settled with another proposal ("'+esc(it.proposals[S.pi].label)+'"). Nothing more can be paid for it in this demo.</div>':'')+'</div><div id="dlv"></div>'+
-'<h2>Evidence</h2><div class="card" id="evid"></div>';
+'<h2>Evidence</h2><div class="card" id="evid"></div></div></div>';
 result=null;
 story=[];flow(0);const lg=$("log");if(lg)lg.innerHTML="";
 say("You opened “"+it.title+"”."+(due?" It is due on "+due+".":""));
@@ -261,7 +303,8 @@ setTimeout(()=>{b.classList.remove("alert");$("shieldtxt").textContent=shieldBas
 
 /* ---------- NEAR agent key policy ---------- */
 try{const sa=localStorage.getItem("am-acc");if(sa&&!$("nacc").value)$("nacc").value=sa}catch(e){}
-$("nacc").addEventListener("change",()=>{try{localStorage.setItem("am-acc",$("nacc").value.trim())}catch(e){}});
+const saveAcc=()=>{try{const v=$("nacc").value.trim();if(v)localStorage.setItem("am-acc",v)}catch(e){}};
+$("nacc").addEventListener("input",saveAcc);$("nacc").addEventListener("change",saveAcc);$("nbtn").addEventListener("click",saveAcc);
 let NEARK=null;
 $("nbtn").addEventListener("click",async()=>{
 const b=$("nbtn"),o=$("nres");b.disabled=true;o.innerHTML='<div class="empty">Asking the NEAR network…</div>';
@@ -343,7 +386,7 @@ const M={completed:["ok","Completed. "+(o.payMode==="escrow"?"The escrow release
 const r=M[o.status]?'<div class="verdict '+M[o.status][0]+'">'+esc(M[o.status][1])+'</div>':"";
 const hold=o.canConfirm?'<div class="verdict warn">The provider\'s proof matched your rule, but the money is still in escrow. Check what you received, then confirm or report a problem.</div>':"";
 const wait=o.status==="open"&&o.waitingFor?'<div class="m" style="color:var(--mute);font-size:14px;margin-top:8px">Waiting for '+esc(o.provider)+': “'+esc(o.waitingFor)+'”. Their answer appears here by itself.</div>':"";
-e.innerHTML='<h2>6. After you approve</h2><div class="card">'+rows(L)+'<div class="note">'+esc(o.payMode==="escrow"?RE:RD)+'</div></div>'+chainCard(o)+hold+code+wait+(b?'<div class="actions">'+b+'</div>':'')+r}
+e.innerHTML='<h2>6. After you approve</h2><div class="card">'+rows(L)+'<div class="note">'+esc(o.payMode==="escrow"?RE:RD)+'</div></div>'+chainCard(o)+hold+code+wait+(b?'<div class="actions">'+b+'</div>':'')+r;if(matchMedia("(min-width:1150px) and (min-height:640px)").matches)e.scrollIntoView({block:"nearest"})}
 
 function stage(a){
 const S=sess[sel],o=S&&S.pi===pi?S.order:null;if(!o||!["expire","accept","report","timeout"].includes(a))return;
@@ -399,7 +442,7 @@ $("adder").addEventListener("click",e=>{const b=e.target.closest("button");if(!b
 renderStory();
 try{
 const r=await fetch("/api/state");if(!r.ok)throw new Error("HTTP "+r.status);
-ST=await r.json();list=ST.items.filter(x=>!x.oneOff).map(x=>({id:x.id,due:addDays(x.dueInDays)}));
+ST=await r.json();try{if(ST.demoAccount&&!$("nacc").value)$("nacc").value=ST.demoAccount}catch(e){}list=ST.items.filter(x=>!x.oneOff).map(x=>({id:x.id,due:addDays(x.dueInDays)}));
 renderList();loadAtt();loadShield();loadChain();
 }catch(e){$("list").innerHTML='<div class="note">Could not load the demo data ('+esc(e.message)+'). Start the app with <code>npm start</code> and open http://localhost:3000.</div>'}
 })();
