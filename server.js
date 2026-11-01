@@ -6,7 +6,7 @@ import { ITEMS, ITEM_ORDER, effectivePlan } from "./scenarios.js";
 import { verify, fetchAttestation } from "./verifier.js";
 import { check } from "./rules.js";
 import { chooseOffer } from "./agent.js";
-import { checkAgentKey } from "./near.js";
+import { checkAgentKey, validAccount } from "./near.js";
 import { createChain, payeeAccount } from "./chain.js";
 import { createOrder, providerAction, expireOrder, buyerAction, userView, providerView } from "./orders.js";
 
@@ -54,8 +54,10 @@ const isoDay = (d) => d.toISOString().slice(0, 10);
 
 // Everything the page needs. All of it is fixed demo data; the page never sends rules or plans back.
 function stateFor(now) {
+  const demo = process.env.NEAR_DEMO_ACCOUNT;
   return {
     today: isoDay(now),
+    demoAccount: validAccount(demo) ? demo : "",
     items: ITEM_ORDER.map((id) => {
       const it = ITEMS[id];
       return {
