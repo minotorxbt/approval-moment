@@ -380,18 +380,19 @@ let b="";
 if(o.status==="open"){
 b='<a class="btnlink" href="/provider" target="_blank" rel="noopener">Open the provider portal ↗</a>';
 if(o.canExpire)b+='<button data-a="expire">Simulate: 3 days pass without confirmation</button>'}
+if(o.canResolve)b='<button data-a="resolve-buyer">Simulated arbitrator: decide for me</button><button data-a="resolve-shop">Simulated arbitrator: decide for the shop</button>';
 if(o.canConfirm)b='<button class="go" data-a="accept">I received it, all good</button><button data-a="report">Report a problem</button><button data-a="timeout">Simulate: 2 days pass without a complaint</button>';
 const code=o.buyerCode?'<div class="note" style="margin-top:12px"><b>Your delivery code: <code>'+esc(o.buyerCode)+'</code></b><br>Give it to the courier only at your door. The shop cannot mark the parcel as delivered without it.</div>':"";
-const M={completed:["ok","Completed. "+(o.payMode==="escrow"?"The escrow released the money to the provider after your confirmation.":"The provider confirmed and the verifier accepted the proof.")],refund:["warn","Your money was refunded; nothing was paid to the provider."],dispute:["bad","Dispute opened: your approval receipt and rule were sent as evidence (simulated)."+(o.payMode==="escrow"?" The payment stays in escrow until a decision.":"")]};
+const M={completed:["ok",o.resolved==="shop"?"Dispute decided for the shop (simulated arbitrator). The escrow released the money to the provider.":"Completed. "+(o.payMode==="escrow"?"The escrow released the money to the provider after your confirmation.":"The provider confirmed and the verifier accepted the proof.")],refund:["warn",o.resolved==="buyer"?"Dispute decided for you (simulated arbitrator). The escrow refunded your money; nothing was paid to the provider.":"Your money was refunded; nothing was paid to the provider."],dispute:["bad","Dispute opened: your approval receipt and rule were sent as evidence (simulated)."+(o.payMode==="escrow"?" The payment stays in escrow until a decision.":"")]};
 const r=M[o.status]?'<div class="verdict '+M[o.status][0]+'">'+esc(M[o.status][1])+'</div>':"";
 const hold=o.canConfirm?'<div class="verdict warn">The provider\'s proof matched your rule, but the money is still in escrow. Check what you received, then confirm or report a problem.</div>':"";
 const wait=o.status==="open"&&o.waitingFor?'<div class="m" style="color:var(--mute);font-size:14px;margin-top:8px">Waiting for '+esc(o.provider)+': “'+esc(o.waitingFor)+'”. Their answer appears here by itself.</div>':"";
 e.innerHTML='<h2>6. After you approve</h2><div class="card">'+rows(L)+'<div class="note">'+esc(o.payMode==="escrow"?RE:RD)+'</div></div>'+chainCard(o)+hold+code+wait+(b?'<div class="actions">'+b+'</div>':'')+r;if(matchMedia("(min-width:1150px) and (min-height:640px)").matches)e.scrollIntoView({block:"nearest"})}
 
 function stage(a){
-const S=sess[sel],o=S&&S.pi===pi?S.order:null;if(!o||!["expire","accept","report","timeout"].includes(a))return;
+const S=sess[sel],o=S&&S.pi===pi?S.order:null;if(!o||!["expire","accept","report","timeout","resolve-buyer","resolve-shop"].includes(a))return;
 if(CH&&CH.enabled)say("Waiting for NEAR testnet to confirm the transfer…");
-fetch("/api/orders/"+o.id+(a==="expire"?"/expire":"/buyer"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:a})}).then(r=>r.json()).then(d=>{if(d.error)say(d.error,"warn")}).catch(()=>say("Could not reach the server.","warn"))}
+fetch("/api/orders/"+o.id+(a==="expire"?"/expire":a.startsWith("resolve")?"/resolve":"/buyer"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(a.startsWith("resolve")?{side:a.slice(8)}:{action:a})}).then(r=>r.json()).then(d=>{if(d.error)say(d.error,"warn")}).catch(()=>say("Could not reach the server.","warn"))}
 
 async function askAgent(btn){
 const id=sel;btn.disabled=true;btn.textContent="The agent is reading the offers…";
@@ -418,6 +419,7 @@ if(ev.actor==="verifier"){say("The verifier compared the proof with your rule: "
 if(ev.data.ok)flow(o.payMode==="escrow"?3:4,"ok");else flow(o.payMode==="escrow"?3:4,"bad");
 say(ev.data.ok?(o.payMode==="escrow"?"The proof matches, but the money stays in escrow until YOU confirm that you received what you ordered.":"Done. Nothing more to do."):"A dispute was opened with your receipt and rule as evidence.",ev.data.ok?"ok":"bad")}
 if(ev.actor==="buyer"){if(ev.action==="accept"){flow(4,"ok");say("You confirmed. The escrow released the money to the provider. Done.","ok")}else{flow(3,"bad");say("You reported a problem. The money stays in escrow and a dispute was opened with your receipt and rule as evidence.","bad")}}
+if(ev.actor==="arbitrator"){if(ev.data.side==="buyer"){flow(0,"warn");say("The simulated arbitrator decided for you. The escrow refunded your money.","warn")}else{flow(4,"ok");say("The simulated arbitrator decided for the shop. The escrow released the money to the provider.","ok")}}
 if(ev.actor==="system"&&ev.action==="autorelease"){flow(4,"ok");say("Two days passed without a complaint, so the escrow released the money to the provider. Done.","ok")}
 if(ev.actor==="system"&&ev.action==="timeout"){flow(o.status==="refund"?0:4,o.status==="refund"?"warn":"bad");
 say(o.status==="refund"?"The provider did not confirm in 3 days. The escrow rule refunded your money automatically.":"The provider did not confirm in 3 days. A dispute was opened with your receipt as evidence.","warn")}}

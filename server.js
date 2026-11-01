@@ -8,7 +8,7 @@ import { check } from "./rules.js";
 import { chooseOffer } from "./agent.js";
 import { checkAgentKey, validAccount } from "./near.js";
 import { createChain, payeeAccount } from "./chain.js";
-import { createOrder, providerAction, expireOrder, buyerAction, userView, providerView } from "./orders.js";
+import { createOrder, providerAction, expireOrder, buyerAction, resolveDispute, userView, providerView } from "./orders.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 try { process.loadEnvFile(path.join(here, ".env")); } catch { /* no .env file: demo mode */ }
@@ -241,6 +241,19 @@ export function createApp({ verifyImpl = verify, attestImpl = fetchAttestation, 
         if (!body) return;
         try { buyerAction(o, String(body.action), now()); } catch (e) { return send(res, e.code || 500, { error: e.message }); }
         if (o.status === "completed" && o.payMode === "escrow") await settle(o, "release", "escrow", o.chainPayee, o.steps.at(-1));
+        announce(o.id);
+        return send(res, 200, userView(o));
+      }
+
+      m = p.match(/^\/api\/orders\/([0-9a-f]{16})\/resolve$/);
+      if (post && m) {
+        const o = orders.get(m[1]);
+        if (!o) return send(res, 404, { error: "order not found" });
+        const body = await jsonBody(req, res);
+        if (!body) return;
+        try { resolveDispute(o, String(body.side), now()); } catch (e) { return send(res, e.code || 500, { error: e.message }); }
+        if (o.resolved === "buyer") await settle(o, "refund", "escrow", chain.accounts?.agent, o.steps.at(-1));
+        else await settle(o, "release", "escrow", o.chainPayee, o.steps.at(-1));
         announce(o.id);
         return send(res, 200, userView(o));
       }

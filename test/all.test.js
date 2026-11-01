@@ -377,6 +377,10 @@ test("escrow: the money is released only after the buyer confirms, or after 2 qu
     const b = await mk();
     await buyer(b, "report");
     assert.equal((await get(b)).status, "dispute");
+    // the simulated arbitrator can decide an escrow dispute once, and only an escrow dispute
+    assert.equal((await post(base, `/api/orders/${b}/resolve`, { side: "shop" })).status, 200);
+    assert.equal((await get(b)).status, "completed");
+    assert.equal((await post(base, `/api/orders/${b}/resolve`, { side: "shop" })).status, 400);
     const c = await mk();
     await buyer(c, "timeout");
     v = await get(c);

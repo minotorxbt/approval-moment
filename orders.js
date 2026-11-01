@@ -196,6 +196,22 @@ export function buyerAction(o, action, now = new Date()) {
   return o;
 }
 
+// Simulated arbitrator: only an escrow order in dispute still has money to decide about.
+export function resolveDispute(o, side, now = new Date()) {
+  if (o.status !== "dispute" || o.payMode !== "escrow") throw fail("There is no escrow money waiting for a decision on this order.");
+  const last = o.steps[o.steps.length - 1];
+  if (side === "buyer") {
+    Object.assign(last, { state: "bad", detail: "Dispute decided for the buyer. The escrow refunded the money." });
+    o.status = "refund";
+  } else if (side === "shop") {
+    Object.assign(last, { state: "done", detail: "Dispute decided for the shop. The escrow released the money." });
+    o.status = "completed";
+  } else throw fail("Unknown decision.");
+  o.resolved = side;
+  o.events.push({ time: now.toISOString(), actor: "arbitrator", action: "resolve", data: { side, result: o.status } });
+  return o;
+}
+
 // "3 days pass and the provider never answered": escrow refunds, a direct payment goes to dispute.
 export function expireOrder(o, now = new Date()) {
   if (o.status !== "open" || o.cursor !== 1) throw fail("Only an order that is waiting for its first provider confirmation can time out.");
@@ -215,6 +231,8 @@ export function userView(o) {
     waitingFor: o.status === "holding" ? "your confirmation" : step ? step.button : null,
     canExpire: o.status === "open" && o.cursor === 1,
     canConfirm: o.status === "holding",
+    canResolve: o.status === "dispute" && o.payMode === "escrow",
+    resolved: o.resolved || null,
   };
 }
 

@@ -193,6 +193,21 @@ test("on-chain orders: escrow holds the money, releases it on the buyer's OK and
     await post(base, `/api/provider/orders/${r2.id}/action`, { action: "complete", result: "Passed", validUntil: "2027-12-31" });
     await post(base, `/api/orders/${r2.id}/buyer`, { action: "report" });
     assert.equal(chain.calls.length, n, "a reported problem keeps the money in escrow");
+    // the simulated arbitrator decides: for the buyer = refund to the agent wallet, for the shop = release to the payee
+    const res = (id, side) => post(base, `/api/orders/${id}/resolve`, { side });
+    assert.equal((await res(r2.id, "nonsense")).status, 400);
+    const back = await (await res(r2.id, "buyer")).json();
+    assert.equal(back.status, "refund");
+    assert.deepEqual([chain.calls.at(-1).from, chain.calls.at(-1).to], ["escrow", chain.accounts.agent]);
+    assert.equal((await res(r2.id, "buyer")).status, 400, "a decided dispute cannot be decided twice");
+    const r3 = await (await post(base, "/api/orders", { item: "car", proposal: "sat", digest: D })).json();
+    await post(base, `/api/provider/orders/${r3.id}/action`, { action: "confirm", code: "INS-1234" });
+    await post(base, `/api/provider/orders/${r3.id}/action`, { action: "complete", result: "Passed", validUntil: "2027-12-31" });
+    await post(base, `/api/orders/${r3.id}/buyer`, { action: "report" });
+    const pay = await (await res(r3.id, "shop")).json();
+    assert.equal(pay.status, "completed");
+    assert.equal(chain.calls.at(-1).from, "escrow");
+    assert.equal(chain.calls.at(-1).to, payeeAccount("City Inspection Center"));
   });
 });
 
